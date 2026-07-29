@@ -1,10 +1,21 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { motion, AnimatePresence } from "framer-motion";
-import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FolderPlus, Upload, LogOut, FileCode2, Clock } from "lucide-react";
+import { toast } from "sonner";
 import { Aurora } from "@/components/Aurora";
 import { YuktiLogo } from "@/components/YuktiLogo";
+import { ModeSelectionModal } from "@/components/ModeSelectionModal";
+import { NewProjectModal } from "@/components/NewProjectModal";
+import { ZipUploadOverlay, type ZipStep } from "@/components/ZipUploadOverlay";
 import { useAuth } from "@/lib/auth-context";
+import { getUserProfile, type UserMode } from "@/lib/user-mode";
+import {
+  createProject,
+  extractZipToFiles,
+  listProjects,
+  type Project,
+} from "@/lib/projects";
 
 export const Route = createFileRoute("/dashboard")({
   ssr: false,
@@ -22,12 +33,75 @@ export const Route = createFileRoute("/dashboard")({
 function Dashboard() {
   const { user, loading, signOut } = useAuth();
   const navigate = useNavigate();
-  const [projects] = useState<Array<{ id: string; name: string; updatedAt: string }>>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [showModeModal, setShowModeModal] = useState(false);
+  const [_mode, setMode] = useState<UserMode | null>(null);
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadSteps, setUploadSteps] = useState<ZipStep[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/login" });
   }, [loading, user, navigate]);
+
+  // Load profile → show mode modal if first login
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const profile = await getUserProfile(user.uid);
+      if (cancelled) return;
+      if (!profile?.mode) {
+        setShowModeModal(true);
+      } else {
+        setMode(profile.mode);
+      }
+      const list = await listProjects(user.uid).catch(() => []);
+      if (!cancelled) setProjects(list);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  const handleZip = useCallback(
+    async (file: File) => {
+      if (!user) return;
+      if (!/\.zip$/i.test(file.name)) {
+        toast.error("Please drop a .zip file.");
+        return;
+      }
+      setUploadFile(file);
+      const steps: ZipStep[] = [
+        { emoji: "📂", label: "Extracting ZIP...", status: "running" },
+        { emoji: "🌲", label: "Building file tree...", status: "pending" },
+        { emoji: "💾", label: "Saving to your account...", status: "pending" },
+        { emoji: "✔", label: "Project ready", status: "pending" },
+      ];
+      setUploadSteps(steps);
+
+      try {
+        const files = await extractZipToFiles(file);
+        setUploadSteps((s) => s.map((x, i) => (i === 0 ? { ...x, status: "done" } : i === 1 ? { ...x, status: "running" } : x)));
+        await new Promise((r) => setTimeout(r, 350));
+        setUploadSteps((s) => s.map((x, i) => (i === 1 ? { ...x, status: "done" } : i === 2 ? { ...x, status: "running" } : x)));
+        const name = file.name.replace(/\.zip$/i, "");
+        const id = await createProject(user.uid, name, files);
+        setUploadSteps((s) => s.map((x, i) => (i === 2 ? { ...x, status: "done" } : i === 3 ? { ...x, status: "done" } : x)));
+        await new Promise((r) => setTimeout(r, 450));
+        toast.success(`Imported ${files.length} files`);
+        navigate({ to: "/project/$id", params: { id } });
+      } catch (e) {
+        console.error(e);
+        toast.error("Couldn't import that ZIP.");
+        setUploadFile(null);
+        setUploadSteps([]);
+      }
+    },
+    [user, navigate],
+  );
 
   useEffect(() => {
     const onDragOver = (e: DragEvent) => {
@@ -40,6 +114,8 @@ function Dashboard() {
     const onDrop = (e: DragEvent) => {
       e.preventDefault();
       setDragging(false);
+      const file = e.dataTransfer?.files?.[0];
+      if (file) handleZip(file);
     };
     window.addEventListener("dragover", onDragOver);
     window.addEventListener("dragleave", onDragLeave);
@@ -49,7 +125,7 @@ function Dashboard() {
       window.removeEventListener("dragleave", onDragLeave);
       window.removeEventListener("drop", onDrop);
     };
-  }, []);
+  }, [handleZip]);
 
   if (loading || !user) {
     return (
@@ -111,11 +187,24 @@ function Dashboard() {
             icon={<FolderPlus className="h-5 w-5" />}
             title="New project"
             body="Create an empty workspace and paste code as you go."
+            onClick={() => setShowNewProject(true)}
           />
           <ActionCard
             icon={<Upload className="h-5 w-5" />}
             title="Upload a ZIP"
             body="Drop a compressed project folder — Yukti will index it in seconds."
+            onClick={() => fileInputRef.current?.click()}
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".zip"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleZip(f);
+              e.target.value = "";
+            }}
           />
         </div>
 
@@ -141,45 +230,51 @@ function Dashboard() {
           ) : (
             <div className="grid gap-3 md:grid-cols-3">
               {projects.map((p) => (
-                <div key={p.id} className="glass rounded-2xl p-5">
+                <Link
+                  key={p.id}
+                  to="/project/$id"
+                  params={{ id: p.id }}
+                  className="glass rounded-2xl p-5 transition hover:border-primary/50 hover:scale-[1.01]"
+                >
                   <div className="text-sm font-semibold">{p.name}</div>
                   <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                     <Clock className="h-3 w-3" />
-                    {p.updatedAt}
+                    {p.files?.length ?? 0} files
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}
         </section>
       </main>
 
-      <AnimatePresence>
-        {dragging && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur"
-          >
-            <motion.div
-              initial={{ scale: 0.9 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.9 }}
-              className="glass flex flex-col items-center gap-4 rounded-3xl border-2 border-dashed border-primary/60 px-16 py-14 text-center"
-            >
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/20 text-primary">
-                <Upload className="h-7 w-7" />
-              </div>
-              <div className="text-2xl font-semibold">Drop your project</div>
-              <div className="text-sm text-muted-foreground">
-                Yukti will unpack and index it automatically.
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <ZipUploadOverlay
+        visible={dragging || !!uploadFile}
+        dropActive={dragging}
+        filename={uploadFile?.name ?? null}
+        steps={uploadSteps}
+      />
+
+      <ModeSelectionModal
+        open={showModeModal}
+        uid={user.uid}
+        onDone={(m) => {
+          setMode(m);
+          setShowModeModal(false);
+          toast.success(`You're all set — ${m === "auto" ? "Auto" : "Manual"} mode enabled.`);
+        }}
+      />
+
+      <NewProjectModal
+        open={showNewProject}
+        onClose={() => setShowNewProject(false)}
+        onCreate={async (name) => {
+          const id = await createProject(user.uid, name, []);
+          setShowNewProject(false);
+          toast.success("Project created");
+          navigate({ to: "/project/$id", params: { id } });
+        }}
+      />
     </div>
   );
 }
@@ -188,13 +283,16 @@ function ActionCard({
   icon,
   title,
   body,
+  onClick,
 }: {
   icon: React.ReactNode;
   title: string;
   body: string;
+  onClick?: () => void;
 }) {
   return (
     <motion.button
+      onClick={onClick}
       whileHover={{ y: -3 }}
       whileTap={{ scale: 0.99 }}
       transition={{ type: "spring", stiffness: 300, damping: 22 }}
