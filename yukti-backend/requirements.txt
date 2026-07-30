@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+firebase-admin
+python-dotenv
+rapidfuzz
+httpx
+anthropic
+pydantic
+google-cloud-firestore
+asyncpg
+sqlalchemy
+databases
