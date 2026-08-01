@@ -530,6 +530,8 @@ function InstructionPanel({
           <ManualTab
             steps={steps}
             diff={diff}
+            phase={phase}
+            running={running}
             ambiguities={ambiguities}
             onRun={runProcessing}
             onApply={applyDiff}
