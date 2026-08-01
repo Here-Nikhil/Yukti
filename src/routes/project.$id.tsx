@@ -22,6 +22,15 @@ import {
   type TreeNode,
 } from "@/lib/projects";
 import { getUserProfile, type UserMode } from "@/lib/user-mode";
+import {
+  applyInstructions,
+  parseLlmOutput,
+  saveUpdatedFilesToFirestore,
+  streamChat,
+  type Ambiguity,
+} from "@/lib/yukti-api";
+import { AmbiguityCards } from "@/components/AmbiguityCards";
+
 
 export const Route = createFileRoute("/project/$id")({
   ssr: false,
@@ -386,42 +395,105 @@ function InstructionPanel({
   const [chat, setChat] = useState<Array<{ role: "user" | "yukti"; text: string }>>([]);
   const [chatInput, setChatInput] = useState("");
 
+  const [ambiguities, setAmbiguities] = useState<Ambiguity[] | null>(null);
+  const [running, setRunning] = useState(false);
+
   const runProcessing = async () => {
     if (!instruction.trim()) {
       toast.error("Paste some LLM output first.");
       return;
     }
+    if (running) return;
+    setRunning(true);
     setDiff(null);
+    setAmbiguities(null);
     const base: Step[] = [
-      { emoji: "📂", label: "Reading project files...", done: "Done", status: "pending" },
-      { emoji: "🤖", label: "Parsing instructions...", done: "Done", status: "pending" },
+      { emoji: "📂", label: "Reading project files...", done: "Done", status: "done" },
+      { emoji: "🤖", label: "Parsing instructions...", done: "Done", status: "running" },
       { emoji: "🔍", label: "Finding anchor points...", done: "Done", status: "pending" },
       { emoji: "📐", label: "Checking indentation...", done: "Done", status: "pending" },
       { emoji: "🔧", label: "Generating diff...", done: "Ready", status: "pending" },
     ];
     setSteps(base);
-    for (let i = 0; i < base.length; i++) {
-      setSteps((s) => s.map((x, idx) => (idx === i ? { ...x, status: "running" } : x)));
-      await new Promise((r) => setTimeout(r, 600));
-      setSteps((s) => s.map((x, idx) => (idx === i ? { ...x, status: "done" } : x)));
+    const mark = (i: number, status: Step["status"]) =>
+      setSteps((s) => s.map((x, idx) => (idx === i ? { ...x, status } : x)));
+
+    try {
+      const parsed = await parseLlmOutput(
+        instruction,
+        project.files.map((f) => f.path),
+      );
+      mark(1, "done");
+
+      if (Array.isArray(parsed.ambiguities) && parsed.ambiguities.length > 0) {
+        setSteps([]);
+        setAmbiguities(parsed.ambiguities);
+        setRunning(false);
+        return;
+      }
+
+      mark(2, "running");
+      const applied = await applyInstructions(project.id, parsed.instructions, project.files);
+      mark(2, "done");
+      mark(3, "done");
+      mark(4, "running");
+
+      const rows: Array<{ type: "add" | "del" | "ctx"; line: string; n: number }> = [];
+      for (const entry of applied.diffs ?? []) {
+        const label = entry.path ?? entry.file ?? "";
+        if (label) rows.push({ type: "ctx", line: `— ${label}`, n: 0 });
+        const lines = (entry.diff ?? "").split("\n");
+        let n = 1;
+        for (const l of lines) {
+          if (l.startsWith("+++") || l.startsWith("---") || l.startsWith("@@")) {
+            rows.push({ type: "ctx", line: l, n: 0 });
+            continue;
+          }
+          if (l.startsWith("+")) rows.push({ type: "add", line: l.slice(1), n: n++ });
+          else if (l.startsWith("-")) rows.push({ type: "del", line: l.slice(1), n: n });
+          else rows.push({ type: "ctx", line: l.replace(/^ /, ""), n: n++ });
+        }
+      }
+      setDiff(rows);
+      mark(4, "done");
+
+      const updated = applied.updated_files ?? [];
+      if (updated.length > 0) {
+        const merged = [...project.files];
+        for (const u of updated) {
+          const idx = merged.findIndex((f) => f.path === u.path);
+          if (idx >= 0) merged[idx] = { path: u.path, content: u.content };
+          else merged.push({ path: u.path, content: u.content });
+        }
+        onFilesChange(merged);
+        await saveUpdatedFilesToFirestore(project.id, updated).catch(() =>
+          toast.error("Couldn't sync files to the cloud"),
+        );
+      }
+
+      if ((applied.diffs ?? []).some((d) => d.applied === false)) {
+        toast.warning("Some changes could not be applied automatically.", {
+          style: { color: "#f43f5e", borderColor: "#f43f5e" },
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      setSteps([]);
+      toast.error(e instanceof Error ? e.message : "Something went wrong", {
+        style: { color: "#f43f5e", borderColor: "#f43f5e" },
+      });
+    } finally {
+      setRunning(false);
     }
-    // Fake unified diff sample
-    setDiff([
-      { type: "ctx", line: "function greet(name) {", n: 1 },
-      { type: "del", line: "  return 'hi ' + name;", n: 2 },
-      { type: "add", line: "  return `Hello, ${name}!`;", n: 2 },
-      { type: "ctx", line: "}", n: 3 },
-    ]);
   };
 
   const applyDiff = () => {
-    toast.success("Diff applied (preview)");
+    toast.success("Changes applied");
     setDiff(null);
     setSteps([]);
     setInstruction("");
-    // Touch files so onFilesChange has an effect (no-op edit persisted timestamp)
-    onFilesChange([...project.files]);
   };
+
 
   return (
     <aside className="flex h-full w-[380px] flex-col border-l border-[#2a2440] bg-[#1a1625]">
@@ -451,14 +523,17 @@ function InstructionPanel({
           <ManualTab
             steps={steps}
             diff={diff}
+            ambiguities={ambiguities}
             onRun={runProcessing}
             onApply={applyDiff}
             onDiscard={() => {
               setDiff(null);
               setSteps([]);
+              setAmbiguities(null);
               toast("Discarded");
             }}
           />
+
         ) : mode !== "auto" ? (
           <div className="rounded-xl border border-[#2a2440] bg-[#0d0b14] p-5 text-sm">
             <div className="font-semibold">You're in Manual mode.</div>
@@ -478,7 +553,9 @@ function InstructionPanel({
             setChat={setChat}
             input={chatInput}
             setInput={setChatInput}
+            files={project.files}
           />
+
         )}
       </div>
     </aside>
@@ -515,12 +592,14 @@ function TabButton({
 function ManualTab({
   steps,
   diff,
+  ambiguities,
   onRun,
   onApply,
   onDiscard,
 }: {
   steps: Step[];
   diff: Array<{ type: "add" | "del" | "ctx"; line: string; n: number }> | null;
+  ambiguities: Ambiguity[] | null;
   onRun: () => void;
   onApply: () => void;
   onDiscard: () => void;
@@ -535,6 +614,9 @@ function ManualTab({
       >
         Apply Instructions
       </motion.button>
+
+      {ambiguities && ambiguities.length > 0 && <AmbiguityCards ambiguities={ambiguities} />}
+
 
       {steps.length > 0 && (
         <div className="space-y-2">
@@ -652,18 +734,45 @@ function AutoChat({
   setChat,
   input,
   setInput,
+  files,
 }: {
   chat: Array<{ role: "user" | "yukti"; text: string }>;
   setChat: React.Dispatch<React.SetStateAction<Array<{ role: "user" | "yukti"; text: string }>>>;
   input: string;
   setInput: (s: string) => void;
+  files: ProjectFile[];
 }) {
-  const send = () => {
-    if (!input.trim()) return;
-    setChat((c) => [...c, { role: "user", text: input.trim() }]);
+  const [sending, setSending] = useState(false);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    const history = chat.map((m) => ({
+      role: m.role === "user" ? "user" : "assistant",
+      content: m.text,
+    }));
+    setChat((c) => [...c, { role: "user", text }, { role: "yukti", text: "" }]);
     setInput("");
-    toast("AI chat wiring is coming in Stage 3");
+    setSending(true);
+    try {
+      await streamChat(text, history, files, (chunk) => {
+        setChat((c) => {
+          const next = [...c];
+          const last = next[next.length - 1];
+          if (last && last.role === "yukti") next[next.length - 1] = { ...last, text: last.text + chunk };
+          return next;
+        });
+      });
+    } catch (e) {
+      console.error(e);
+      toast.error("Chat error. Please try again.", {
+        style: { color: "#f43f5e", borderColor: "#f43f5e" },
+      });
+    } finally {
+      setSending(false);
+    }
   };
+
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-3">
