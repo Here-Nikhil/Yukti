@@ -800,6 +800,7 @@ function ManualTab({
           </div>
         </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
 }
