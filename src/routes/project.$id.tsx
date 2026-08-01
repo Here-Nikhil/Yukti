@@ -489,6 +489,7 @@ function InstructionPanel({
         style: { color: "#f43f5e", borderColor: "#f43f5e" },
       });
     } finally {
+      setPhase("idle");
       setRunning(false);
     }
   };
