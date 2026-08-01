@@ -397,6 +397,7 @@ function InstructionPanel({
 
   const [ambiguities, setAmbiguities] = useState<Ambiguity[] | null>(null);
   const [running, setRunning] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "parsing" | "applying">("idle");
 
   const runProcessing = async () => {
     if (!instruction.trim()) {
@@ -405,6 +406,7 @@ function InstructionPanel({
     }
     if (running) return;
     setRunning(true);
+    setPhase("parsing");
     setDiff(null);
     setAmbiguities(null);
     const base: Step[] = [
@@ -415,6 +417,7 @@ function InstructionPanel({
       { emoji: "🔧", label: "Generating diff...", done: "Ready", status: "pending" },
     ];
     setSteps(base);
+
     const mark = (i: number, status: Step["status"]) =>
       setSteps((s) => s.map((x, idx) => (idx === i ? { ...x, status } : x)));
 
