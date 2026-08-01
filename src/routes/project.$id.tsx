@@ -805,6 +805,27 @@ function ManualTab({
   );
 }
 
+function TypingDots() {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="flex items-center gap-1 py-0.5"
+    >
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          animate={{ opacity: [0.3, 1, 0.3], y: [0, -2, 0] }}
+          transition={{ duration: 1, repeat: Infinity, delay: i * 0.18, ease: "easeInOut" }}
+          className="h-1.5 w-1.5 rounded-full bg-[#8b5cf6]"
+        />
+      ))}
+    </motion.div>
+  );
+}
+
 function AutoChat({
   chat,
   setChat,
