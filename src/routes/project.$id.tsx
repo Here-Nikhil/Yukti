@@ -878,22 +878,41 @@ function AutoChat({
             Ask Yukti to change anything in your project. It has all your files open.
           </div>
         )}
-        {chat.map((m, i) => (
-          <div
-            key={i}
-            className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
-                m.role === "user"
-                  ? "bg-[#8b5cf6] text-white"
-                  : "border border-[#2a2440] bg-[#1a1625] text-foreground"
-              }`}
+        <AnimatePresence initial={false}>
+          {chat.map((m, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
             >
-              {m.text}
-            </div>
-          </div>
-        ))}
+              <div
+                className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
+                  m.role === "user"
+                    ? "bg-[#8b5cf6] text-white"
+                    : "border border-[#2a2440] bg-[#1a1625] text-foreground"
+                }`}
+              >
+                <AnimatePresence mode="wait" initial={false}>
+                  {m.role === "yukti" && m.text === "" && sending && i === chat.length - 1 ? (
+                    <TypingDots key="dots" />
+                  ) : (
+                    <motion.span
+                      key="text"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      {m.text}
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
       <div className="border-t border-[#2a2440] pt-3">
         <div className="mb-1 text-[11px] text-muted-foreground">
