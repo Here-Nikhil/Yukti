@@ -598,9 +598,54 @@ function TabButton({
   );
 }
 
+function ProcessingOverlay({ phase }: { phase: "parsing" | "applying" }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.25, ease: "easeOut" }}
+      className="relative overflow-hidden rounded-xl border border-[#8b5cf6]/40 bg-[#0d0b14] p-8"
+    >
+      <motion.div
+        aria-hidden
+        animate={{ x: ["-100%", "100%"] }}
+        transition={{ duration: 1.6, repeat: Infinity, ease: "linear" }}
+        className="pointer-events-none absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-[#8b5cf6]/15 to-transparent"
+      />
+      <div className="relative flex flex-col items-center gap-4">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+          className="h-9 w-9 rounded-full border-2 border-[#2a2440] border-t-[#8b5cf6]"
+        />
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={phase}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.22 }}
+            className="text-[13px] font-medium text-[#c4b5fd]"
+          >
+            {phase === "parsing" ? "Parsing instructions..." : "Applying changes..."}
+          </motion.div>
+        </AnimatePresence>
+        <motion.div
+          animate={{ opacity: [0.35, 1, 0.35] }}
+          transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+          className="h-1 w-32 rounded-full bg-[#8b5cf6]"
+        />
+      </div>
+    </motion.div>
+  );
+}
+
 function ManualTab({
   steps,
   diff,
+  phase,
+  running,
   ambiguities,
   onRun,
   onApply,
@@ -608,6 +653,8 @@ function ManualTab({
 }: {
   steps: Step[];
   diff: Array<{ type: "add" | "del" | "ctx"; line: string; n: number }> | null;
+  phase: "idle" | "parsing" | "applying";
+  running: boolean;
   ambiguities: Ambiguity[] | null;
   onRun: () => void;
   onApply: () => void;
@@ -616,20 +663,35 @@ function ManualTab({
   return (
     <div className="space-y-4">
       <motion.button
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.99 }}
+        whileHover={running ? undefined : { scale: 1.02 }}
+        whileTap={running ? undefined : { scale: 0.99 }}
         onClick={onRun}
-        className="w-full rounded-xl bg-[#8b5cf6] px-4 py-2.5 text-sm font-medium text-white transition hover:shadow-[0_0_24px_-4px_#8b5cf6]"
+        disabled={running}
+        className="w-full rounded-xl bg-[#8b5cf6] px-4 py-2.5 text-sm font-medium text-white transition hover:shadow-[0_0_24px_-4px_#8b5cf6] disabled:opacity-60"
       >
-        Apply Instructions
+        {running ? "Working…" : "Apply Instructions"}
       </motion.button>
 
-      {ambiguities && ambiguities.length > 0 && <AmbiguityCards ambiguities={ambiguities} />}
+      <AnimatePresence mode="wait">
+        {running && phase !== "idle" ? (
+          <ProcessingOverlay key="overlay" phase={phase} />
+        ) : ambiguities && ambiguities.length > 0 ? (
+          <motion.div
+            key="ambiguities"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25 }}
+          >
+            <AmbiguityCards ambiguities={ambiguities} />
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
-
-      {steps.length > 0 && (
+      {!running && steps.length > 0 && (
         <div className="space-y-2">
           {steps.map((s, i) => (
+
             <motion.div
               key={i}
               initial={{ opacity: 0, y: 4 }}
