@@ -397,6 +397,7 @@ function InstructionPanel({
 
   const [ambiguities, setAmbiguities] = useState<Ambiguity[] | null>(null);
   const [running, setRunning] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "parsing" | "applying">("idle");
 
   const runProcessing = async () => {
     if (!instruction.trim()) {
@@ -405,6 +406,7 @@ function InstructionPanel({
     }
     if (running) return;
     setRunning(true);
+    setPhase("parsing");
     setDiff(null);
     setAmbiguities(null);
     const base: Step[] = [
@@ -415,6 +417,7 @@ function InstructionPanel({
       { emoji: "🔧", label: "Generating diff...", done: "Ready", status: "pending" },
     ];
     setSteps(base);
+
     const mark = (i: number, status: Step["status"]) =>
       setSteps((s) => s.map((x, idx) => (idx === i ? { ...x, status } : x)));
 
@@ -428,12 +431,15 @@ function InstructionPanel({
       if (Array.isArray(parsed.ambiguities) && parsed.ambiguities.length > 0) {
         setSteps([]);
         setAmbiguities(parsed.ambiguities);
+        setPhase("idle");
         setRunning(false);
         return;
       }
 
+      setPhase("applying");
       mark(2, "running");
       const applied = await applyInstructions(project.id, parsed.instructions, project.files);
+
       mark(2, "done");
       mark(3, "done");
       mark(4, "running");
@@ -483,6 +489,7 @@ function InstructionPanel({
         style: { color: "#f43f5e", borderColor: "#f43f5e" },
       });
     } finally {
+      setPhase("idle");
       setRunning(false);
     }
   };
@@ -523,6 +530,8 @@ function InstructionPanel({
           <ManualTab
             steps={steps}
             diff={diff}
+            phase={phase}
+            running={running}
             ambiguities={ambiguities}
             onRun={runProcessing}
             onApply={applyDiff}
@@ -589,9 +598,54 @@ function TabButton({
   );
 }
 
+function ProcessingOverlay({ phase }: { phase: "parsing" | "applying" }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.25, ease: "easeOut" }}
+      className="relative overflow-hidden rounded-xl border border-[#8b5cf6]/40 bg-[#0d0b14] p-8"
+    >
+      <motion.div
+        aria-hidden
+        animate={{ x: ["-100%", "100%"] }}
+        transition={{ duration: 1.6, repeat: Infinity, ease: "linear" }}
+        className="pointer-events-none absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-[#8b5cf6]/15 to-transparent"
+      />
+      <div className="relative flex flex-col items-center gap-4">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+          className="h-9 w-9 rounded-full border-2 border-[#2a2440] border-t-[#8b5cf6]"
+        />
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={phase}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.22 }}
+            className="text-[13px] font-medium text-[#c4b5fd]"
+          >
+            {phase === "parsing" ? "Parsing instructions..." : "Applying changes..."}
+          </motion.div>
+        </AnimatePresence>
+        <motion.div
+          animate={{ opacity: [0.35, 1, 0.35] }}
+          transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+          className="h-1 w-32 rounded-full bg-[#8b5cf6]"
+        />
+      </div>
+    </motion.div>
+  );
+}
+
 function ManualTab({
   steps,
   diff,
+  phase,
+  running,
   ambiguities,
   onRun,
   onApply,
@@ -599,6 +653,8 @@ function ManualTab({
 }: {
   steps: Step[];
   diff: Array<{ type: "add" | "del" | "ctx"; line: string; n: number }> | null;
+  phase: "idle" | "parsing" | "applying";
+  running: boolean;
   ambiguities: Ambiguity[] | null;
   onRun: () => void;
   onApply: () => void;
@@ -607,20 +663,35 @@ function ManualTab({
   return (
     <div className="space-y-4">
       <motion.button
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.99 }}
+        whileHover={running ? undefined : { scale: 1.02 }}
+        whileTap={running ? undefined : { scale: 0.99 }}
         onClick={onRun}
-        className="w-full rounded-xl bg-[#8b5cf6] px-4 py-2.5 text-sm font-medium text-white transition hover:shadow-[0_0_24px_-4px_#8b5cf6]"
+        disabled={running}
+        className="w-full rounded-xl bg-[#8b5cf6] px-4 py-2.5 text-sm font-medium text-white transition hover:shadow-[0_0_24px_-4px_#8b5cf6] disabled:opacity-60"
       >
-        Apply Instructions
+        {running ? "Working…" : "Apply Instructions"}
       </motion.button>
 
-      {ambiguities && ambiguities.length > 0 && <AmbiguityCards ambiguities={ambiguities} />}
+      <AnimatePresence mode="wait">
+        {running && phase !== "idle" ? (
+          <ProcessingOverlay key="overlay" phase={phase} />
+        ) : ambiguities && ambiguities.length > 0 ? (
+          <motion.div
+            key="ambiguities"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25 }}
+          >
+            <AmbiguityCards ambiguities={ambiguities} />
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
-
-      {steps.length > 0 && (
+      {!running && steps.length > 0 && (
         <div className="space-y-2">
           {steps.map((s, i) => (
+
             <motion.div
               key={i}
               initial={{ opacity: 0, y: 4 }}
@@ -670,10 +741,14 @@ function ManualTab({
         </div>
       )}
 
-      {diff && (
+      <AnimatePresence>
+      {diff && !running && (
         <motion.div
+          key="diff"
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.25 }}
           className="overflow-hidden rounded-xl border border-[#2a2440] bg-[#0d0b14]"
         >
           <div className="border-b border-[#2a2440] px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -725,7 +800,29 @@ function ManualTab({
           </div>
         </motion.div>
       )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+function TypingDots() {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="flex items-center gap-1 py-0.5"
+    >
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          animate={{ opacity: [0.3, 1, 0.3], y: [0, -2, 0] }}
+          transition={{ duration: 1, repeat: Infinity, delay: i * 0.18, ease: "easeInOut" }}
+          className="h-1.5 w-1.5 rounded-full bg-[#8b5cf6]"
+        />
+      ))}
+    </motion.div>
   );
 }
 
@@ -781,22 +878,41 @@ function AutoChat({
             Ask Yukti to change anything in your project. It has all your files open.
           </div>
         )}
-        {chat.map((m, i) => (
-          <div
-            key={i}
-            className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
-                m.role === "user"
-                  ? "bg-[#8b5cf6] text-white"
-                  : "border border-[#2a2440] bg-[#1a1625] text-foreground"
-              }`}
+        <AnimatePresence initial={false}>
+          {chat.map((m, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
             >
-              {m.text}
-            </div>
-          </div>
-        ))}
+              <div
+                className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
+                  m.role === "user"
+                    ? "bg-[#8b5cf6] text-white"
+                    : "border border-[#2a2440] bg-[#1a1625] text-foreground"
+                }`}
+              >
+                <AnimatePresence mode="wait" initial={false}>
+                  {m.role === "yukti" && m.text === "" && sending && i === chat.length - 1 ? (
+                    <TypingDots key="dots" />
+                  ) : (
+                    <motion.span
+                      key="text"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      {m.text}
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
       <div className="border-t border-[#2a2440] pt-3">
         <div className="mb-1 text-[11px] text-muted-foreground">
