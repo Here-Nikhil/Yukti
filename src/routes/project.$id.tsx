@@ -431,12 +431,15 @@ function InstructionPanel({
       if (Array.isArray(parsed.ambiguities) && parsed.ambiguities.length > 0) {
         setSteps([]);
         setAmbiguities(parsed.ambiguities);
+        setPhase("idle");
         setRunning(false);
         return;
       }
 
+      setPhase("applying");
       mark(2, "running");
       const applied = await applyInstructions(project.id, parsed.instructions, project.files);
+
       mark(2, "done");
       mark(3, "done");
       mark(4, "running");
