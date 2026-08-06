@@ -121,7 +121,12 @@ class LLMOutputParser:
                         buffer = para
                     else:
                         if para.strip():
-                            merged.append(para.strip())
+                            # If this paragraph has no code block but next might,
+                            # buffer it to merge with the next paragraph
+                            if not merged or "```" in merged[-1]:
+                                merged.append(para.strip())
+                            else:
+                                merged[-1] = merged[-1] + "\n\n" + para.strip()
             if buffer.strip():
                 merged.append(buffer.strip())
             return merged if merged else [text.strip()]
