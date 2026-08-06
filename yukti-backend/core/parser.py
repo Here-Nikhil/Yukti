@@ -1,4 +1,4 @@
-Not even you will give me this specific LM outputs. Okay, so make it work like when you give me the normal instructions that I can just paste there yes, but I understand your issue. But the thing is you don't write it exactly as you have given me you give me changes normally so shouldn't it be able to do thatimport re
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
@@ -70,9 +70,6 @@ class LLMOutputParser:
             r"change.+to",
             r"swap.+for",
             r"instead of",
-            r"replace with",
-            r"replace:",
-            r"find.{0,20}replace",
         ]
         return any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
