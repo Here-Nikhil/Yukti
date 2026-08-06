@@ -219,7 +219,6 @@ function Workspace() {
         mode={mode}
         project={project}
         onFilesChange={handleFilesChange}
-
       />
     </div>
   );
@@ -640,16 +639,8 @@ function InstructionPanel({
       for (const entry of applied.diffs ?? []) {
         const label = entry.path ?? entry.file ?? "";
         if (label) rows.push({ type: "ctx", line: `— ${label}`, n: 0 });
-        const lines = (entry.diff ?? "").split("\n");
-        let n = 1;
-        for (const l of lines) {
-          if (l.startsWith("+++") || l.startsWith("---") || l.startsWith("@@")) {
-            rows.push({ type: "ctx", line: l, n: 0 });
-            continue;
-          }
-          if (l.startsWith("+")) rows.push({ type: "add", line: l.slice(1), n: n++ });
-          else if (l.startsWith("-")) rows.push({ type: "del", line: l.slice(1), n: n });
-          else rows.push({ type: "ctx", line: l.replace(/^ /, ""), n: n++ });
+        for (const hunk of (entry as any).hunks ?? []) {
+          rows.push({ type: hunk.type, line: hunk.line, n: hunk.n });
         }
       }
       setDiff(rows);
@@ -663,6 +654,8 @@ function InstructionPanel({
           if (idx >= 0) merged[idx] = { path: u.path, content: u.content };
           else merged.push({ path: u.path, content: u.content });
         }
+        console.log("[yukti] updated_files from backend:", updated);
+        console.log("[yukti] merged files:", merged);
         onFilesChange(merged);
         await saveUpdatedFilesToFirestore(project.id, updated).catch(() =>
           toast.error("Couldn't sync files to the cloud"),
@@ -692,7 +685,6 @@ function InstructionPanel({
     setSteps([]);
     setInstruction("");
   };
-
 
   return (
     <aside className="flex h-full w-[380px] flex-col border-l border-[#2a2440] bg-[#1a1625]">
@@ -734,7 +726,6 @@ function InstructionPanel({
               toast("Discarded");
             }}
           />
-
         ) : mode !== "auto" ? (
           <div className="rounded-xl border border-[#2a2440] bg-[#0d0b14] p-5 text-sm">
             <div className="font-semibold">You're in Manual mode.</div>
@@ -756,7 +747,6 @@ function InstructionPanel({
             setInput={setChatInput}
             files={project.files}
           />
-
         )}
       </div>
     </aside>
@@ -883,7 +873,6 @@ function ManualTab({
       {!running && steps.length > 0 && (
         <div className="space-y-2">
           {steps.map((s, i) => (
-
             <motion.div
               key={i}
               initial={{ opacity: 0, y: 4 }}
@@ -934,64 +923,64 @@ function ManualTab({
       )}
 
       <AnimatePresence>
-      {diff && !running && (
-        <motion.div
-          key="diff"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          transition={{ duration: 0.25 }}
-          className="overflow-hidden rounded-xl border border-[#2a2440] bg-[#0d0b14]"
-        >
-          <div className="border-b border-[#2a2440] px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Diff preview
-          </div>
-          <div className="font-mono text-[12px]">
-            {diff.map((row, i) => (
-              <div
-                key={i}
-                className={`flex ${
-                  row.type === "add"
-                    ? "bg-emerald-500/10"
-                    : row.type === "del"
-                      ? "bg-rose-500/10"
-                      : ""
-                }`}
-              >
-                <span className="w-8 shrink-0 select-none px-2 py-0.5 text-right text-muted-foreground">
-                  {row.n}
-                </span>
-                <span
-                  className={`w-4 shrink-0 select-none ${
+        {diff && !running && (
+          <motion.div
+            key="diff"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25 }}
+            className="overflow-hidden rounded-xl border border-[#2a2440] bg-[#0d0b14]"
+          >
+            <div className="border-b border-[#2a2440] px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Diff preview
+            </div>
+            <div className="font-mono text-[12px]">
+              {diff.map((row, i) => (
+                <div
+                  key={i}
+                  className={`flex ${
                     row.type === "add"
-                      ? "text-emerald-400"
+                      ? "bg-emerald-500/10"
                       : row.type === "del"
-                        ? "text-rose-400"
-                        : "text-transparent"
+                        ? "bg-rose-500/10"
+                        : ""
                   }`}
                 >
-                  {row.type === "add" ? "+" : row.type === "del" ? "-" : " "}
-                </span>
-                <span className="flex-1 whitespace-pre py-0.5 pr-2">{row.line}</span>
-              </div>
-            ))}
-          </div>
-          <div className="flex gap-2 border-t border-[#2a2440] p-3">
-            <button
-              onClick={onApply}
-              className="flex-1 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-white transition hover:scale-[1.02]"
-            >
-              Apply Changes
-            </button>
-            <button
-              onClick={onDiscard}
-              className="flex-1 rounded-lg bg-rose-500 px-3 py-2 text-sm font-medium text-white transition hover:scale-[1.02]"
-            >
-              Discard
-            </button>
-          </div>
-        </motion.div>
-      )}
+                  <span className="w-8 shrink-0 select-none px-2 py-0.5 text-right text-muted-foreground">
+                    {row.n}
+                  </span>
+                  <span
+                    className={`w-4 shrink-0 select-none ${
+                      row.type === "add"
+                        ? "text-emerald-400"
+                        : row.type === "del"
+                          ? "text-rose-400"
+                          : "text-transparent"
+                    }`}
+                  >
+                    {row.type === "add" ? "+" : row.type === "del" ? "-" : " "}
+                  </span>
+                  <span className="flex-1 whitespace-pre py-0.5 pr-2">{row.line}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 border-t border-[#2a2440] p-3">
+              <button
+                onClick={onApply}
+                className="flex-1 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-white transition hover:scale-[1.02]"
+              >
+                Apply Changes
+              </button>
+              <button
+                onClick={onDiscard}
+                className="flex-1 rounded-lg bg-rose-500 px-3 py-2 text-sm font-medium text-white transition hover:scale-[1.02]"
+              >
+                Discard
+              </button>
+            </div>
+          </motion.div>
+        )}
       </AnimatePresence>
     </div>
   );
