@@ -29,7 +29,7 @@ app = FastAPI(
 # CORS — tighten allow_origins to your Lovable domain before going to prod.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins     = ["*"],
+    allow_origins     = ["https://yukti-ns.vercel.app"],
     allow_credentials = True,
     allow_methods     = ["*"],
     allow_headers     = ["*"],
