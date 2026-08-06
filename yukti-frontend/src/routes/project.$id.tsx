@@ -170,7 +170,7 @@ function Workspace() {
         <div className="min-h-0 flex-1">
           {activeFile ? (
             <Editor
-              key={activeFile.path}
+              key={activeFile.path + activeFile.content.length}
               height="100%"
               theme="vs-dark"
               path={activeFile.path}
