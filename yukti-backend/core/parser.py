@@ -288,7 +288,7 @@ class LLMOutputParser:
         if not fenced:
             fenced = re.findall(r'```[ \t]*\n(.*?)```', text, re.DOTALL)
         if fenced:
-            return [b.strip() for b in fenced]
+            return [b.rstrip() for b in fenced]
 
         # Inline code with backticks (single)
         inline = re.findall(r'`([^`]+)`', text)
