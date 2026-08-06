@@ -90,7 +90,10 @@ class FuzzyMatcher:
 
             # token_set_ratio handles reordered / partially missing tokens
             # better than simple ratio for code snippets.
-            score = fuzz.token_set_ratio(target_joined, window) / 100.0
+            if window_height == 1:
+                score = fuzz.ratio(target_joined, window) / 100.0
+            else:
+                score = fuzz.token_set_ratio(target_joined, window) / 100.0
 
             if score > best_score:
                 best_score      = score
