@@ -284,7 +284,9 @@ class LLMOutputParser:
 
     def _extract_code_blocks(self, text: str) -> list[str]:
         # Fenced code blocks: ```lang\n...\n```
-        fenced = re.findall(r'```(?:\w+)?\n(.*?)```', text, re.DOTALL)
+        fenced = re.findall(r'```(?:\w+)?[ \t]*\n(.*?)```', text, re.DOTALL)
+        if not fenced:
+            fenced = re.findall(r'```[ \t]*\n(.*?)```', text, re.DOTALL)
         if fenced:
             return [b.strip() for b in fenced]
 
