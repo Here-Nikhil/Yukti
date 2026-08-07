@@ -225,7 +225,183 @@ function Workspace() {
   );
 }
 
-/* ----------------------- File tree ----------------------- */
+/* ----------------------- Sidebar uploads ----------------------- */
+
+const ghostBtn =
+  "flex w-full items-center gap-2 rounded-lg border border-[#2a2440] bg-[#0d0b14] px-2.5 py-1.5 text-[11px] font-medium text-[#c4b5fd] transition-colors hover:bg-[#2a2440] disabled:opacity-60";
+
+function mergeFiles(existing: ProjectFile[], incoming: ProjectFile[]): ProjectFile[] {
+  const map = new Map(existing.map((f) => [f.path, f]));
+  for (const f of incoming) map.set(f.path, f);
+  return [...map.values()];
+}
+
+function SidebarUploads({
+  files,
+  onFilesChange,
+  onPick,
+}: {
+  files: ProjectFile[];
+  onFilesChange: (files: ProjectFile[]) => void | Promise<void>;
+  onPick: (path: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pastePath, setPastePath] = useState("");
+  const [pasteContent, setPasteContent] = useState("");
+  const zipRef = useRef<HTMLInputElement>(null);
+  const filesRef = useRef<HTMLInputElement>(null);
+
+  const handleZip = async (file: File) => {
+    setBusy(true);
+    try {
+      const extracted = await extractZipToFiles(file);
+      const merged = mergeFiles(files, extracted);
+      await onFilesChange(merged);
+      if (extracted[0]) onPick(extracted[0].path);
+      toast.success(`Added ${extracted.length} files from ${file.name}`);
+    } catch {
+      toast.error("Couldn't read that ZIP archive");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleFileList = async (list: FileList) => {
+    setBusy(true);
+    try {
+      const incoming = await Promise.all(
+        Array.from(list).map(
+          (f) =>
+            new Promise<ProjectFile>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve({ path: f.name, content: String(reader.result ?? "") });
+              reader.onerror = () => reject(reader.error);
+              reader.readAsText(f);
+            }),
+        ),
+      );
+      const merged = mergeFiles(files, incoming);
+      await onFilesChange(merged);
+      if (incoming[0]) onPick(incoming[0].path);
+      toast.success(`Added ${incoming.length} file${incoming.length === 1 ? "" : "s"}`);
+    } catch {
+      toast.error("Couldn't read those files");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmPaste = async () => {
+    const path = pastePath.trim();
+    if (!path) {
+      toast.error("Enter a file path");
+      return;
+    }
+    setBusy(true);
+    try {
+      await onFilesChange(mergeFiles(files, [{ path, content: pasteContent }]));
+      onPick(path);
+      setPasteOpen(false);
+      setPastePath("");
+      setPasteContent("");
+      toast.success(`Added ${path}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="mt-3 space-y-1.5">
+        <button type="button" className={ghostBtn} disabled={busy} onClick={() => zipRef.current?.click()}>
+          <Upload className="h-3.5 w-3.5" />
+          Upload ZIP
+        </button>
+        <button type="button" className={ghostBtn} disabled={busy} onClick={() => filesRef.current?.click()}>
+          <FileUp className="h-3.5 w-3.5" />
+          Upload Files
+        </button>
+        <button type="button" className={ghostBtn} disabled={busy} onClick={() => setPasteOpen(true)}>
+          <ClipboardPaste className="h-3.5 w-3.5" />
+          Paste File
+        </button>
+      </div>
+
+      <input
+        ref={zipRef}
+        type="file"
+        accept=".zip"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) void handleZip(f);
+        }}
+      />
+      <input
+        ref={filesRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const list = e.target.files;
+          if (list && list.length) void handleFileList(list);
+          e.target.value = "";
+        }}
+      />
+
+      <AnimatePresence>
+        {pasteOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-6"
+            onClick={() => setPasteOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-lg rounded-xl border border-[#2a2440] bg-[#1a1625] p-5"
+            >
+              <div className="text-sm font-semibold text-white">Paste a file</div>
+              <input
+                value={pastePath}
+                onChange={(e) => setPastePath(e.target.value)}
+                placeholder="src/utils/helper.ts"
+                className="mt-4 w-full rounded-lg border border-[#2a2440] bg-[#0d0b14] px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#8b5cf6]"
+              />
+              <textarea
+                value={pasteContent}
+                onChange={(e) => setPasteContent(e.target.value)}
+                placeholder="File content…"
+                rows={10}
+                className="mt-3 w-full resize-none rounded-lg border border-[#2a2440] bg-[#0d0b14] px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#8b5cf6]"
+              />
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" className={`${ghostBtn} w-auto`} onClick={() => setPasteOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void confirmPaste()}
+                  className="rounded-lg bg-[#8b5cf6] px-4 py-1.5 text-[11px] font-semibold text-white shadow-[0_0_20px_rgba(139,92,246,0.45)] transition-opacity hover:opacity-90 disabled:opacity-60"
+                >
+                  Add file
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
 
 function FileTree({
   node,
