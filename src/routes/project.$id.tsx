@@ -5,12 +5,16 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ChevronRight,
   ChevronDown,
+  ClipboardPaste,
   File as FileIcon,
   FileCode2,
+  FileUp,
   Folder,
   FolderOpen,
   Send,
+  Upload,
 } from "lucide-react";
+
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
 import {
