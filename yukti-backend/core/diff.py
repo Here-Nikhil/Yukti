@@ -114,6 +114,8 @@ class DiffGenerator:
 
         # ── REPLACE ───────────────────────────────────────────────────────────
         if action == ActionEnum.REPLACE:
+            if not instruction.target:
+                return instruction.replacement or file_content
             anchor      = self._locate(file_content, instruction, fuzzy)
             replacement = self._indent_block(
                 new_block    = instruction.replacement or "",
