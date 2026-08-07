@@ -91,15 +91,40 @@ class LLMOutputParser:
         LLM output often contains multiple instructions separated by
         numbered lists, blank lines, or headings. Split them.
         """
+        # If the whole text contains exactly one code block, treat as single chunk
+        fence_count = text.count("```")
+        if fence_count == 2:
+            return [text.strip()]
+
         # Split on numbered list items: "1.", "2.", etc.
         numbered = re.split(r'\n(?=\d+\.)', text)
         if len(numbered) > 1:
             return [c.strip() for c in numbered if c.strip()]
 
-        # Split on double newlines (paragraph breaks)
+        # Split on double newlines but re-join if a code block spans the boundary
         paragraphs = re.split(r'\n{2,}', text)
         if len(paragraphs) > 1:
-            return [p.strip() for p in paragraphs if p.strip()]
+            merged = []
+            buffer = ""
+            in_code_block = False
+            for para in paragraphs:
+                toggles = para.count("```")
+                if in_code_block:
+                    buffer = buffer + "\n\n" + para
+                    if toggles % 2 == 1:
+                        in_code_block = False
+                        merged.append(buffer.strip())
+                        buffer = ""
+                else:
+                    if toggles % 2 == 1:
+                        in_code_block = True
+                        buffer = para
+                    else:
+                        if para.strip():
+                            merged.append(para.strip())
+            if buffer.strip():
+                merged.append(buffer.strip())
+            return merged if merged else [text.strip()]
 
         # Single instruction
         return [text.strip()]
