@@ -92,6 +92,14 @@ function Workspace() {
     [project, activePath],
   );
 
+  const handleFilesChange = async (files: ProjectFile[]) => {
+    if (!project) return;
+    setProject({ ...project, files });
+    await saveProjectFiles(project.id, files).catch(() =>
+      toast.error("Couldn't persist file changes"),
+    );
+  };
+
   if (fetching || !project) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
@@ -114,7 +122,13 @@ function Workspace() {
           <span className="mt-1 inline-block rounded-full bg-[#8b5cf6]/20 px-2 py-0.5 text-[10px] font-medium text-[#c4b5fd]">
             {project.files.length} files
           </span>
+          <SidebarUploads
+            files={project.files}
+            onFilesChange={handleFilesChange}
+            onPick={setActivePath}
+          />
         </div>
+
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
           {tree && (
             <FileTree
