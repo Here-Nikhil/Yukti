@@ -218,12 +218,8 @@ function Workspace() {
       <InstructionPanel
         mode={mode}
         project={project}
-        onFilesChange={async (files) => {
-          setProject({ ...project, files });
-          await saveProjectFiles(project.id, files).catch(() =>
-            toast.error("Couldn't persist file changes"),
-          );
-        }}
+        onFilesChange={handleFilesChange}
+
       />
     </div>
   );
