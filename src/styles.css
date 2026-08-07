@@ -146,3 +146,16 @@
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
 }
+
+/* Suppress the Lovable "Edit with Lovable" badge on published deployments */
+[class*="lovable-badge"],
+[id*="lovable-badge"],
+[class*="edit-with-lovable"],
+[id*="edit-with-lovable"],
+a[href*="lovable.app/badge"],
+a[href*="lovable.app/edit"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
