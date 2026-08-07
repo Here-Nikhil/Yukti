@@ -71,7 +71,9 @@ async def apply_instructions(
                 """
                 INSERT INTO project_files (project_id, uid, path, content, language)
                 VALUES (:project_id, :uid, :path, :content, :language)
-                ON CONFLICT DO NOTHING
+                ON CONFLICT (project_id, path) DO UPDATE
+                    SET content = EXCLUDED.content,
+                        updated_at = now()
                 """,
                 values={
                     "project_id": body.project_id,
