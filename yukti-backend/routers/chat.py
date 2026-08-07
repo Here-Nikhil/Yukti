@@ -2,16 +2,18 @@
 routers/chat.py
 ───────────────
 POST /chat  (Auto mode)
-  • Fetches the user's personal Claude API key from Firestore.
-  • Streams the Anthropic response back as SSE (Server-Sent Events).
-  • Injects all project files into the system prompt so Claude has context.
+  • Fetches the user's API key from Firestore.
+  • Auto-detects provider from key prefix:
+      gsk_... → Groq
+      AIza... → Gemini
+      sk-ant-... → Anthropic
+  • Streams the response back as SSE (Server-Sent Events).
 
-SSE format (each event):
+SSE format:
   data: <text chunk>\n\n
-  data: [DONE]\n\n   ← signals end of stream to the frontend
+  data: [DONE]\n\n
 """
 
-import anthropic
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
@@ -29,87 +31,134 @@ SYSTEM_PROMPT_BASE = (
 )
 
 
+def detect_provider(api_key: str) -> str:
+    if api_key.startswith("gsk_"):
+        return "groq"
+    if api_key.startswith("AIza"):
+        return "gemini"
+    if api_key.startswith("sk-ant-"):
+        return "anthropic"
+    raise ValueError("Unrecognised API key format. Expected Groq (gsk_), Gemini (AIza), or Anthropic (sk-ant-).")
+
+
 @router.post("")
 async def chat(
     body: ChatRequest,
     current_user: dict = Depends(get_current_user),
 ) -> StreamingResponse:
-    """
-    Proxy a chat message to Anthropic using the user's own API key,
-    streamed back as Server-Sent Events.
-    """
     uid = current_user["uid"]
 
-    # ── 1. Fetch the user's Claude API key from Firestore ─────────────────────
+    # ── 1. Fetch API key from Firestore ───────────────────────────────────────
     db       = get_firestore()
     user_doc = db.collection("users").document(uid).get()
 
     if not user_doc.exists:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found in Firestore.",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="User profile not found in Firestore.")
 
     user_data = user_doc.to_dict()
 
     if user_data.get("mode") != "auto":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User is not in Auto mode. Enable it in settings.",
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="User is not in Auto mode. Enable it in settings.")
 
     api_key = user_data.get("claudeApiKey")
     if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No Claude API key stored. Add one in your account settings.",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="No API key stored. Add one in your account settings.")
 
-    # ── 2. Build system prompt with all project files as context ──────────────
+    # ── 2. Detect provider ────────────────────────────────────────────────────
+    try:
+        provider = detect_provider(api_key)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    # ── 3. Build system prompt + messages ─────────────────────────────────────
     file_context = "\n\n".join(
         f"### {pf.path}\n```\n{pf.content}\n```"
         for pf in body.project_files
     )
     system_prompt = f"{SYSTEM_PROMPT_BASE}\n\n---\n\n{file_context}"
 
-    # ── 3. Build message history ───────────────────────────────────────────────
-    messages = [
-        {"role": m.role, "content": m.content}
-        for m in body.history
-    ]
+    messages = [{"role": m.role, "content": m.content} for m in body.history]
     messages.append({"role": "user", "content": body.message})
 
-    # ── 4. Stream from Anthropic ──────────────────────────────────────────────
-    client = anthropic.Anthropic(api_key=api_key)
-
-    async def event_generator():
-        try:
-            with client.messages.stream(
-                model      = "claude-sonnet-4-6",
-                max_tokens = 4096,
-                system     = system_prompt,
-                messages   = messages,
-            ) as stream:
-                for text_chunk in stream.text_stream:
-                    # Escape any bare newlines inside the SSE data field.
-                    safe_chunk = text_chunk.replace("\n", "\\n")
-                    yield f"data: {safe_chunk}\n\n"
-
-            yield "data: [DONE]\n\n"
-
-        except anthropic.AuthenticationError:
-            yield "data: [ERROR] Invalid Claude API key. Please update it in settings.\n\n"
-        except anthropic.RateLimitError:
-            yield "data: [ERROR] Claude rate limit reached. Try again shortly.\n\n"
-        except Exception as exc:
-            yield f"data: [ERROR] Unexpected error: {exc}\n\n"
-
+    # ── 4. Stream ─────────────────────────────────────────────────────────────
+    if provider == "groq":
+        return StreamingResponse(
+            _stream_groq(api_key, system_prompt, messages),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    if provider == "gemini":
+        return StreamingResponse(
+            _stream_gemini(api_key, system_prompt, messages),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    # anthropic
     return StreamingResponse(
-        event_generator(),
+        _stream_anthropic(api_key, system_prompt, messages),
         media_type="text/event-stream",
-        headers={
-            # Prevent any proxy or CDN from buffering the stream.
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── Provider streaming functions ──────────────────────────────────────────────
+
+async def _stream_groq(api_key: str, system_prompt: str, messages: list):
+    try:
+        from groq import Groq
+        client = Groq(api_key=api_key)
+        stream = client.chat.completions.create(
+            model    = "llama-3.3-70b-versatile",
+            messages = [{"role": "system", "content": system_prompt}] + messages,
+            stream   = True,
+        )
+        for chunk in stream:
+            text = chunk.choices[0].delta.content or ""
+            if text:
+                yield f"data: {text.replace(chr(10), chr(92) + 'n')}\n\n"
+        yield "data: [DONE]\n\n"
+    except Exception as exc:
+        yield f"data: [ERROR] Groq error: {exc}\n\n"
+
+
+async def _stream_gemini(api_key: str, system_prompt: str, messages: list):
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(
+            model_name   = "gemini-1.5-flash",
+            system_instruction = system_prompt,
+        )
+        history = [
+            {"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]}
+            for m in messages[:-1]
+        ]
+        chat   = model.start_chat(history=history)
+        stream = chat.send_message(messages[-1]["content"], stream=True)
+        for chunk in stream:
+            text = chunk.text or ""
+            if text:
+                yield f"data: {text.replace(chr(10), chr(92) + 'n')}\n\n"
+        yield "data: [DONE]\n\n"
+    except Exception as exc:
+        yield f"data: [ERROR] Gemini error: {exc}\n\n"
+
+
+async def _stream_anthropic(api_key: str, system_prompt: str, messages: list):
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        with client.messages.stream(
+            model      = "claude-sonnet-4-6",
+            max_tokens = 4096,
+            system     = system_prompt,
+            messages   = messages,
+        ) as stream:
+            for text in stream.text_stream:
+                yield f"data: {text.replace(chr(10), chr(92) + 'n')}\n\n"
+        yield "data: [DONE]\n\n"
+    except Exception as exc:
+        yield f"data: [ERROR] Anthropic error: {exc}\n\n"

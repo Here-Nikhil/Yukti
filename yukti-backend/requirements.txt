@@ -10,3 +10,4 @@ google-cloud-firestore
 asyncpg
 sqlalchemy
 databases
+groq
