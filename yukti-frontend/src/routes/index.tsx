@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, FileCode2, Sparkles, GitBranch, Zap } from "lucide-react";
 import { Aurora } from "@/components/Aurora";
 import { YuktiLogo } from "@/components/YuktiLogo";
@@ -179,12 +180,54 @@ function Feature({
 }
 
 function DemoCard() {
-  const codeLines = [
+  const [phase, setPhase] = useState<"show" | "highlight" | "snap" | "type">("show");
+  const [typed, setTyped] = useState(0);
+
+  const wrongLine = `  const total = items.reduce((a, b) => a + b, 0);`;
+  const newLines = `  const total = items.reduce((a, b) => a + b.price, 0);\n  const tax = total * 0.1;`;
+
+  const [cycle, setCycle] = useState(0);
+
+  useEffect(() => {
+    const t1 = setTimeout(() => setPhase("highlight"), 1500);
+    const t2 = setTimeout(() => setPhase("snap"), 2400);
+    const t3 = setTimeout(() => setPhase("type"), 3200);
+    const t4 = setTimeout(() => {
+      setPhase("show");
+      setTyped(0);
+      setCycle(c => c + 1);
+    }, 3200 + newLines.length * 16 + 2000);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); };
+  }, [cycle]);
+
+  useEffect(() => {
+    if (phase !== "type") return;
+    setTyped(0);
+    const iv = setInterval(() => {
+      setTyped(n => {
+        if (n >= newLines.length) { clearInterval(iv); return n; }
+        return n + 1;
+      });
+    }, 16);
+    return () => clearInterval(iv);
+  }, [phase]);
+
+  const particles = useMemo(() =>
+    wrongLine.split("").map((ch) => ({
+      ch,
+      dx: (Math.random() - 0.5) * 30,
+      dy: -20 - Math.random() * 40,
+      delay: Math.random() * 0.3,
+    })),
+  []);
+
+  const diffLines = [
     { t: "- const total = items.reduce((a, b) => a + b, 0);", kind: "del" },
     { t: "+ const total = items.reduce((a, b) => a + b.price, 0);", kind: "add" },
     { t: "+ const tax = total * 0.1;", kind: "add" },
     { t: "  return { total, tax };", kind: "ctx" },
   ];
+
   return (
     <div className="glass overflow-hidden rounded-3xl border border-border/60 text-left shadow-2xl shadow-primary/10">
       <div className="flex items-center justify-between border-b border-border/60 bg-card/60 px-4 py-3">
@@ -193,39 +236,71 @@ function DemoCard() {
           <span className="h-2.5 w-2.5 rounded-full bg-yellow-500/70" />
           <span className="h-2.5 w-2.5 rounded-full bg-green-500/70" />
         </div>
-        <span className="font-mono text-xs text-muted-foreground">
-          src/utils/checkout.ts
-        </span>
+        <span className="font-mono text-xs text-muted-foreground">src/utils/checkout.ts</span>
         <span className="rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-medium text-primary">
           Applying
         </span>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2">
-        <div className="border-b border-border/60 bg-card/40 p-5 md:border-b-0 md:border-r">
-          <div className="mb-3 text-xs uppercase tracking-widest text-muted-foreground">
-            LLM output
-          </div>
-          <motion.pre
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-            className="font-mono text-xs leading-relaxed text-foreground/90"
-          >
-            {`Fix the checkout total — it's summing raw items instead of prices, and tax is missing.
 
-\`\`\`ts
-const total = items.reduce((a, b) => a + b.price, 0);
-const tax = total * 0.1;
-return { total, tax };
-\`\`\``}
-          </motion.pre>
+      <div className="grid grid-cols-1 md:grid-cols-2">
+        {/* LEFT — live animated code */}
+        <div className="border-b border-border/60 bg-card/40 p-5 md:border-b-0 md:border-r min-h-[160px]">
+          <div className="mb-3 text-xs uppercase tracking-widest text-muted-foreground">Code</div>
+          <pre className="font-mono text-xs leading-relaxed text-foreground/90 whitespace-pre">
+            {"function calcTotal(items) {\n"}
+            {phase === "show" && (
+              <span>{wrongLine}{"\n"}</span>
+            )}
+            {phase === "highlight" && (
+              <motion.span
+                initial={{ backgroundColor: "transparent" }}
+                animate={{ backgroundColor: "rgba(239,68,68,0.2)" }}
+                className="block rounded text-red-300"
+              >
+                {wrongLine}{"\n"}
+              </motion.span>
+            )}
+            {phase === "snap" && (
+              <span className="inline-block">
+                {"  "}
+                {particles.map((p, i) => (
+                  <motion.span
+                    key={i}
+                    initial={{ opacity: 1, y: 0, x: 0, color: "#fca5a5" }}
+                    animate={{ opacity: 0, y: p.dy, x: p.dx, color: "#8b5cf6" }}
+                    transition={{ duration: 0.7, delay: p.delay, ease: "easeOut" }}
+                    className="inline-block"
+                  >
+                    {p.ch === " " ? "\u00A0" : p.ch}
+                  </motion.span>
+                ))}
+                {"\n"}
+              </span>
+            )}
+            {phase === "type" && (
+              <motion.span
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="block"
+              >
+                {newLines.slice(0, typed)}
+                <motion.span
+                  animate={{ opacity: [1, 0, 1] }}
+                  transition={{ duration: 0.9, repeat: Infinity }}
+                  className="inline-block h-[1em] w-[6px] translate-y-[2px] bg-[#8b5cf6]"
+                />
+                {"\n"}
+              </motion.span>
+            )}
+            {"  return { total, tax };\n}"}
+          </pre>
         </div>
+
+        {/* RIGHT — static diff preview */}
         <div className="p-5">
-          <div className="mb-3 text-xs uppercase tracking-widest text-muted-foreground">
-            Diff preview
-          </div>
+          <div className="mb-3 text-xs uppercase tracking-widest text-muted-foreground">Diff preview</div>
           <div className="space-y-1 font-mono text-xs">
-            {codeLines.map((line, i) => (
+            {diffLines.map((line, i) => (
               <motion.div
                 key={i}
                 initial={{ opacity: 0, x: -6 }}

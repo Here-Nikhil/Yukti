@@ -21,7 +21,9 @@ export type DiffEntry = {
 export type ApplyResponse = {
   diffs?: DiffEntry[];
   updated_files?: ProjectFile[];
+  applied?: number;
 };
+
 
 async function authHeader(): Promise<Record<string, string>> {
   const u = getFirebaseAuth().currentUser;

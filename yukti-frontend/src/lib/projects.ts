@@ -5,6 +5,8 @@ import {
   doc,
   getDoc,
   getDocs,
+  increment,
+  limit,
   orderBy,
   query,
   serverTimestamp,
@@ -12,6 +14,7 @@ import {
   where,
 } from "firebase/firestore";
 import { getDb } from "./firebase";
+import type { UserMode } from "./user-mode";
 
 export type ProjectFile = { path: string; content: string };
 
@@ -20,9 +23,12 @@ export type Project = {
   name: string;
   ownerId: string;
   files: ProjectFile[];
+  mode?: UserMode;
+  appliedCount?: number;
   updatedAt?: unknown;
   createdAt?: unknown;
 };
+
 
 const MAX_FILE_BYTES = 200_000; // per file cap for Firestore
 
@@ -104,6 +110,59 @@ export async function saveProjectFiles(id: string, files: ProjectFile[]): Promis
     { merge: true },
   );
 }
+
+export async function getMostRecentProject(ownerId: string): Promise<Project | null> {
+  const q = query(
+    collection(getDb(), "projects"),
+    where("ownerId", "==", ownerId),
+    orderBy("updatedAt", "desc"),
+    limit(1),
+  );
+  const snap = await getDocs(q);
+  const d = snap.docs[0];
+  return d ? { id: d.id, ...(d.data() as Omit<Project, "id">) } : null;
+}
+
+export async function setProjectMode(id: string, mode: UserMode): Promise<void> {
+  await setDoc(doc(getDb(), "projects", id), { mode, updatedAt: serverTimestamp() }, { merge: true });
+}
+
+export async function bumpAppliedCount(id: string, by: number): Promise<void> {
+  if (!by) return;
+  await setDoc(
+    doc(getDb(), "projects", id),
+    { appliedCount: increment(by), updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+}
+
+// ---- Downloads ----
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export function downloadFile(file: ProjectFile): void {
+  triggerDownload(
+    new Blob([file.content], { type: "text/plain;charset=utf-8" }),
+    file.path.split("/").pop() || "file.txt",
+  );
+}
+
+export async function downloadAllAsZip(name: string, files: ProjectFile[]): Promise<void> {
+  const zip = new JSZip();
+  for (const f of files) zip.file(f.path, f.content);
+  const blob = await zip.generateAsync({ type: "blob" });
+  triggerDownload(blob, `${name || "project"}.zip`);
+}
+
+
 
 // ---- File tree helpers ----
 export type TreeNode = {

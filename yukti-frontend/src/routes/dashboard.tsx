@@ -5,7 +5,7 @@ import { FolderPlus, Upload, LogOut, FileCode2, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { Aurora } from "@/components/Aurora";
 import { YuktiLogo } from "@/components/YuktiLogo";
-import { ModeSelectionModal } from "@/components/ModeSelectionModal";
+
 import { NewProjectModal } from "@/components/NewProjectModal";
 import { ZipUploadOverlay, type ZipStep } from "@/components/ZipUploadOverlay";
 import { useAuth } from "@/lib/auth-context";
@@ -35,7 +35,7 @@ function Dashboard() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [dragging, setDragging] = useState(false);
-  const [showModeModal, setShowModeModal] = useState(false);
+  
   const [_mode, setMode] = useState<UserMode | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -46,25 +46,28 @@ function Dashboard() {
     if (!loading && !user) navigate({ to: "/login" });
   }, [loading, user, navigate]);
 
-  // Load profile → show mode modal if first login
+  // Load profile + restore the most recent workspace automatically
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     (async () => {
       const profile = await getUserProfile(user.uid);
       if (cancelled) return;
-      if (!profile?.mode) {
-        setShowModeModal(true);
-      } else {
-        setMode(profile.mode);
-      }
+      if (profile?.mode) setMode(profile.mode);
       const list = await listProjects(user.uid).catch(() => []);
-      if (!cancelled) setProjects(list);
+      if (cancelled) return;
+      setProjects(list);
+      // Returning user with a prior workspace → jump straight back into it.
+      if (list.length > 0 && !sessionStorage.getItem("yukti-skip-restore")) {
+        sessionStorage.setItem("yukti-skip-restore", "1");
+        navigate({ to: "/project/$id", params: { id: list[0].id } });
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, navigate]);
+
 
   const handleZip = useCallback(
     async (file: File) => {
@@ -255,15 +258,6 @@ function Dashboard() {
         steps={uploadSteps}
       />
 
-      <ModeSelectionModal
-        open={showModeModal}
-        uid={user.uid}
-        onDone={(m) => {
-          setMode(m);
-          setShowModeModal(false);
-          toast.success(`You're all set — ${m === "auto" ? "Auto" : "Manual"} mode enabled.`);
-        }}
-      />
 
       <NewProjectModal
         open={showNewProject}

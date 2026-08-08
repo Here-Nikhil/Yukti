@@ -6,12 +6,15 @@ import {
   ChevronRight,
   ChevronDown,
   ClipboardPaste,
+  Download,
   File as FileIcon,
   FileCode2,
   FileUp,
   Folder,
   FolderOpen,
+  Plus,
   Send,
+  Trash2,
   Upload,
 } from "lucide-react";
 
@@ -19,14 +22,20 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
 import {
   buildTree,
+  bumpAppliedCount,
+  createProject,
+  downloadAllAsZip,
+  downloadFile,
   extractZipToFiles,
   getProject,
+  listProjects,
   saveProjectFiles,
-
+  setProjectMode,
   type Project,
   type ProjectFile,
   type TreeNode,
 } from "@/lib/projects";
+import { addMessage, clearMessages, listMessages } from "@/lib/chat-history";
 import { getUserProfile, type UserMode } from "@/lib/user-mode";
 import {
   applyInstructions,
@@ -36,7 +45,10 @@ import {
   type Ambiguity,
 } from "@/lib/yukti-api";
 import { AmbiguityCards } from "@/components/AmbiguityCards";
-
+import { ModeToggle } from "@/components/ModeToggle";
+import { ModeSplash } from "@/components/ModeSplash";
+import { SnapCode } from "@/components/SnapCode";
+import { NewProjectModal } from "@/components/NewProjectModal";
 
 export const Route = createFileRoute("/project/$id")({
   ssr: false,
@@ -51,6 +63,8 @@ export const Route = createFileRoute("/project/$id")({
   component: Workspace,
 });
 
+type ChatEntry = { role: "user" | "yukti"; text: string };
+
 function Workspace() {
   const { id } = Route.useParams();
   const { user, loading } = useAuth();
@@ -59,6 +73,10 @@ function Workspace() {
   const [activePath, setActivePath] = useState<string | null>(null);
   const [mode, setMode] = useState<UserMode>("manual");
   const [fetching, setFetching] = useState(true);
+  const [showSplash, setShowSplash] = useState(false);
+  const [appliedCount, setAppliedCount] = useState(0);
+  const [chat, setChat] = useState<ChatEntry[]>([]);
+  const [snap, setSnap] = useState<{ path: string; oldCode: string; newCode: string } | null>(null);
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/login" });
@@ -78,8 +96,12 @@ function Workspace() {
       }
       setProject(p);
       setActivePath(p.files[0]?.path ?? null);
-      setMode(profile?.mode ?? "manual");
+      setMode(p.mode ?? profile?.mode ?? "manual");
+      setAppliedCount(p.appliedCount ?? 0);
+      setShowSplash(!p.mode);
       setFetching(false);
+      const history = await listMessages(id).catch(() => []);
+      if (!cancelled) setChat(history.map((m) => ({ role: m.role, text: m.text })));
     })();
     return () => {
       cancelled = true;
@@ -95,9 +117,59 @@ function Workspace() {
   const handleFilesChange = async (files: ProjectFile[]) => {
     if (!project) return;
     setProject({ ...project, files });
+    if (activePath && !files.some((f) => f.path === activePath)) {
+      setActivePath(files[0]?.path ?? null);
+    }
     await saveProjectFiles(project.id, files).catch(() =>
       toast.error("Couldn't persist file changes"),
     );
+  };
+
+  const selectMode = async (m: UserMode) => {
+    setMode(m);
+    setShowSplash(false);
+    if (project) await setProjectMode(project.id, m).catch(() => {});
+  };
+
+  const persistMessage = (role: "user" | "yukti", text: string) => {
+    if (!project) return;
+    void addMessage(project.id, { role, text, mode }).catch(() => {});
+  };
+
+  const handleClearHistory = () => {
+    if (!project) return;
+    toast("Clear this workspace's chat history?", {
+      action: {
+        label: "Clear",
+        onClick: () => {
+          setChat([]);
+          void clearMessages(project.id)
+            .then(() => toast.success("Chat history cleared"))
+            .catch(() => toast.error("Couldn't clear history"));
+        },
+      },
+    });
+  };
+
+  const handleDeleteFile = (path: string) => {
+    if (!project) return;
+    const target = project.files.find((f) => f.path === path);
+    if (!target) return;
+    toast(`Delete ${path}?`, {
+      action: {
+        label: "Delete",
+        onClick: () => {
+          void handleFilesChange(project.files.filter((f) => f.path !== path)).then(() =>
+            toast.success(`Deleted ${path}`),
+          );
+        },
+      },
+    });
+  };
+
+  const handleDownloadFile = (path: string) => {
+    const f = project?.files.find((x) => x.path === path);
+    if (f) downloadFile(f);
   };
 
   if (fetching || !project) {
@@ -110,18 +182,23 @@ function Workspace() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#0d0b14] text-foreground">
+      <AnimatePresence>
+        {showSplash && <ModeSplash key="splash" onSelect={(m) => void selectMode(m)} />}
+      </AnimatePresence>
+
       {/* Left column */}
-      <aside
-        className="flex h-full w-[260px] flex-col border-r border-[#2a2440] bg-[#1a1625]"
-      >
+      <aside className="flex h-full w-[260px] flex-col border-r border-[#2a2440] bg-[#1a1625]">
         <div className="border-b border-[#2a2440] px-4 py-4">
           <Link to="/dashboard" className="text-xs text-muted-foreground hover:text-foreground">
             ← Back to dashboard
           </Link>
           <div className="mt-3 truncate text-sm font-semibold text-white">{project.name}</div>
-          <span className="mt-1 inline-block rounded-full bg-[#8b5cf6]/20 px-2 py-0.5 text-[10px] font-medium text-[#c4b5fd]">
-            {project.files.length} files
-          </span>
+          <div className="mt-1 flex items-center gap-2">
+            <span className="inline-block rounded-full bg-[#8b5cf6]/20 px-2 py-0.5 text-[10px] font-medium text-[#c4b5fd]">
+              {project.files.length} files
+            </span>
+            {user && <WorkspaceSwitcher uid={user.uid} currentId={project.id} />}
+          </div>
           <SidebarUploads
             files={project.files}
             onFilesChange={handleFilesChange}
@@ -130,12 +207,28 @@ function Workspace() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
+          {project.files.length > 0 && (
+            <button
+              type="button"
+              onClick={() =>
+                void downloadAllAsZip(project.name, project.files).then(() =>
+                  toast.success("Download started"),
+                )
+              }
+              className={`${ghostBtn} mb-2`}
+            >
+              <Download className="h-3.5 w-3.5" />
+              Download All
+            </button>
+          )}
           {tree && (
             <FileTree
               node={tree}
               depth={0}
               activePath={activePath}
               onPick={setActivePath}
+              onDownload={handleDownloadFile}
+              onDelete={handleDeleteFile}
               indexRef={{ i: 0 }}
             />
           )}
@@ -146,31 +239,23 @@ function Workspace() {
           )}
         </div>
         <div className="border-t border-[#2a2440] px-4 py-3 text-[11px] text-[#8b87a0]">
-          <div>Changes Applied: 0</div>
+          <div>Changes Applied: {appliedCount}</div>
           <div>Pending: 0</div>
         </div>
       </aside>
 
       {/* Center column */}
       <section className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between border-b border-[#2a2440] bg-[#141020] px-5 py-3">
+        <div className="flex items-center justify-between gap-4 border-b border-[#2a2440] bg-[#141020] px-5 py-3">
           <div className="truncate font-mono text-xs text-muted-foreground">
             {activeFile ? activeFile.path : project.name}
           </div>
-          <span
-            className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
-              mode === "auto"
-                ? "bg-[#8b5cf6]/25 text-[#c4b5fd]"
-                : "bg-[#2a2440] text-[#c4b5fd]"
-            }`}
-          >
-            {mode === "auto" ? "Auto" : "Manual"}
-          </span>
+          <ModeToggle value={mode} onChange={(m) => void selectMode(m)} />
         </div>
-        <div className="min-h-0 flex-1">
+        <div className="relative min-h-0 flex-1">
           {activeFile ? (
             <Editor
-              key={activeFile.path + activeFile.content.slice(-20)}
+              key={activeFile.path}
               height="100%"
               theme="vs-dark"
               path={activeFile.path}
@@ -211,6 +296,26 @@ function Workspace() {
               </div>
             </div>
           )}
+
+          <AnimatePresence>
+            {snap && (
+              <motion.div
+                key={snap.path}
+                initial={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="absolute inset-0 z-20 overflow-hidden bg-[#0d0b14] px-[26px] pt-3"
+              >
+                <SnapCode
+                  oldCode={snap.oldCode}
+                  newCode={snap.newCode}
+                  showFor={120}
+                  typeSpeed={5}
+                  onDone={() => window.setTimeout(() => setSnap(null), 250)}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </section>
 
@@ -218,7 +323,102 @@ function Workspace() {
       <InstructionPanel
         mode={mode}
         project={project}
+        chat={chat}
+        setChat={setChat}
+        onPersistMessage={persistMessage}
+        onClearHistory={handleClearHistory}
         onFilesChange={handleFilesChange}
+        onApplied={(count) => {
+          if (!count) return;
+          setAppliedCount((c) => c + count);
+          void bumpAppliedCount(project.id, count).catch(() => {});
+        }}
+        onSnap={(path, oldCode, newCode) => {
+          setActivePath(path);
+          setSnap({ path, oldCode, newCode });
+        }}
+      />
+    </div>
+  );
+}
+
+/* ----------------------- Workspace switcher ----------------------- */
+
+function WorkspaceSwitcher({ uid, currentId }: { uid: string; currentId: string }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<Project[]>([]);
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    void listProjects(uid)
+      .then(setItems)
+      .catch(() => setItems([]));
+  }, [open, uid]);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="text-[10px] font-medium text-[#8b87a0] underline-offset-2 hover:text-[#c4b5fd] hover:underline"
+      >
+        New / Switch
+      </button>
+      <AnimatePresence>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              className="absolute left-0 top-6 z-40 max-h-64 w-[210px] overflow-y-auto rounded-lg border border-[#2a2440] bg-[#0d0b14] p-1 shadow-xl"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  setCreating(true);
+                }}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-[#c4b5fd] hover:bg-[#2a2440]"
+              >
+                <Plus className="h-3.5 w-3.5" /> New workspace
+              </button>
+              <div className="my-1 h-px bg-[#2a2440]" />
+              {items.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    if (p.id !== currentId) navigate({ to: "/project/$id", params: { id: p.id } });
+                  }}
+                  className={`block w-full truncate rounded-md px-2 py-1.5 text-left text-[12px] hover:bg-[#2a2440] ${
+                    p.id === currentId ? "text-white" : "text-[#d6d1e6]"
+                  }`}
+                >
+                  {p.name}
+                </button>
+              ))}
+              {items.length === 0 && (
+                <div className="px-2 py-1.5 text-[11px] text-[#8b87a0]">No other workspaces</div>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <NewProjectModal
+        open={creating}
+        onClose={() => setCreating(false)}
+        onCreate={async (name) => {
+          const id = await createProject(uid, name, []);
+          setCreating(false);
+          toast.success("Workspace created");
+          navigate({ to: "/project/$id", params: { id } });
+        }}
       />
     </div>
   );
@@ -401,18 +601,21 @@ function SidebarUploads({
   );
 }
 
-
 function FileTree({
   node,
   depth,
   activePath,
   onPick,
+  onDownload,
+  onDelete,
   indexRef,
 }: {
   node: TreeNode;
   depth: number;
   activePath: string | null;
   onPick: (p: string) => void;
+  onDownload: (p: string) => void;
+  onDelete: (p: string) => void;
   indexRef: { i: number };
 }) {
   return (
@@ -425,6 +628,8 @@ function FileTree({
             depth={depth}
             activePath={activePath}
             onPick={onPick}
+            onDownload={onDownload}
+            onDelete={onDelete}
             indexRef={indexRef}
           />
         ) : (
@@ -434,6 +639,8 @@ function FileTree({
             depth={depth}
             active={activePath === child.path}
             onPick={onPick}
+            onDownload={onDownload}
+            onDelete={onDelete}
             index={indexRef.i++}
           />
         ),
@@ -447,12 +654,16 @@ function DirRow({
   depth,
   activePath,
   onPick,
+  onDownload,
+  onDelete,
   indexRef,
 }: {
   node: TreeNode;
   depth: number;
   activePath: string | null;
   onPick: (p: string) => void;
+  onDownload: (p: string) => void;
+  onDelete: (p: string) => void;
   indexRef: { i: number };
 }) {
   const [open, setOpen] = useState(depth < 1);
@@ -491,6 +702,8 @@ function DirRow({
               depth={depth + 1}
               activePath={activePath}
               onPick={onPick}
+              onDownload={onDownload}
+              onDelete={onDelete}
               indexRef={indexRef}
             />
           </motion.div>
@@ -505,31 +718,56 @@ function FileRow({
   depth,
   active,
   onPick,
+  onDownload,
+  onDelete,
   index,
 }: {
   node: TreeNode;
   depth: number;
   active: boolean;
   onPick: (p: string) => void;
+  onDownload: (p: string) => void;
+  onDelete: (p: string) => void;
   index: number;
 }) {
   const color = colorFor(node.name);
   return (
-    <motion.button
+    <motion.div
       initial={{ opacity: 0, x: -8 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.04 }}
-      onClick={() => onPick(node.path)}
-      className={`flex w-full items-center gap-1.5 rounded-md py-1 text-left text-[13px] transition ${
+      className={`group flex w-full items-center gap-1.5 rounded-md py-1 pr-1 text-left text-[13px] transition ${
         active
           ? "border-l-2 border-[#8b5cf6] bg-[#8b5cf6]/15 text-white"
           : "border-l-2 border-transparent text-[#d6d1e6] hover:bg-white/5"
       }`}
       style={{ paddingLeft: 8 + depth * 12 + 14 }}
     >
-      <FileIcon className="h-3.5 w-3.5" style={{ color }} />
-      <span className="truncate">{node.name}</span>
-    </motion.button>
+      <button
+        type="button"
+        onClick={() => onPick(node.path)}
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+      >
+        <FileIcon className="h-3.5 w-3.5 shrink-0" style={{ color }} />
+        <span className="truncate">{node.name}</span>
+      </button>
+      <button
+        type="button"
+        aria-label={`Download ${node.name}`}
+        onClick={() => onDownload(node.path)}
+        className="shrink-0 rounded p-0.5 text-[#8b87a0] opacity-0 transition group-hover:opacity-100 hover:text-[#c4b5fd]"
+      >
+        <Download className="h-3 w-3" />
+      </button>
+      <button
+        type="button"
+        aria-label={`Delete ${node.name}`}
+        onClick={() => onDelete(node.path)}
+        className="shrink-0 rounded p-0.5 text-[#8b87a0] opacity-0 transition group-hover:opacity-100 hover:text-[#f43f5e]"
+      >
+        <Trash2 className="h-3 w-3" />
+      </button>
+    </motion.div>
   );
 }
 
@@ -573,22 +811,38 @@ type Step = { emoji: string; label: string; done: string; status: "pending" | "r
 function InstructionPanel({
   mode,
   project,
+  chat,
+  setChat,
+  onPersistMessage,
+  onClearHistory,
   onFilesChange,
+  onApplied,
+  onSnap,
 }: {
   mode: UserMode;
   project: Project;
+  chat: ChatEntry[];
+  setChat: React.Dispatch<React.SetStateAction<ChatEntry[]>>;
+  onPersistMessage: (role: "user" | "yukti", text: string) => void;
+  onClearHistory: () => void;
   onFilesChange: (files: ProjectFile[]) => void;
+  onApplied: (count: number) => void;
+  onSnap: (path: string, oldCode: string, newCode: string) => void;
 }) {
   const [tab, setTab] = useState<"manual" | "auto">(mode === "auto" ? "auto" : "manual");
   const [instruction, setInstruction] = useState("");
   const [steps, setSteps] = useState<Step[]>([]);
   const [diff, setDiff] = useState<Array<{ type: "add" | "del" | "ctx"; line: string; n: number }> | null>(null);
-  const [chat, setChat] = useState<Array<{ role: "user" | "yukti"; text: string }>>([]);
   const [chatInput, setChatInput] = useState("");
 
   const [ambiguities, setAmbiguities] = useState<Ambiguity[] | null>(null);
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState<"idle" | "parsing" | "applying">("idle");
+
+  // Keep the panel in sync with the always-visible top bar toggle.
+  useEffect(() => {
+    setTab(mode === "auto" ? "auto" : "manual");
+  }, [mode]);
 
   const runProcessing = async () => {
     if (!instruction.trim()) {
@@ -639,8 +893,16 @@ function InstructionPanel({
       for (const entry of applied.diffs ?? []) {
         const label = entry.path ?? entry.file ?? "";
         if (label) rows.push({ type: "ctx", line: `— ${label}`, n: 0 });
-        for (const hunk of (entry as any).hunks ?? []) {
-          rows.push({ type: hunk.type, line: hunk.line, n: hunk.n });
+        const lines = (entry.diff ?? "").split("\n");
+        let n = 1;
+        for (const l of lines) {
+          if (l.startsWith("+++") || l.startsWith("---") || l.startsWith("@@")) {
+            rows.push({ type: "ctx", line: l, n: 0 });
+            continue;
+          }
+          if (l.startsWith("+")) rows.push({ type: "add", line: l.slice(1), n: n++ });
+          else if (l.startsWith("-")) rows.push({ type: "del", line: l.slice(1), n: n });
+          else rows.push({ type: "ctx", line: l.replace(/^ /, ""), n: n++ });
         }
       }
       setDiff(rows);
@@ -648,19 +910,26 @@ function InstructionPanel({
 
       const updated = applied.updated_files ?? [];
       if (updated.length > 0) {
+        const first = updated[0];
+        const before = project.files.find((f) => f.path === first.path)?.content ?? "";
         const merged = [...project.files];
         for (const u of updated) {
           const idx = merged.findIndex((f) => f.path === u.path);
           if (idx >= 0) merged[idx] = { path: u.path, content: u.content };
           else merged.push({ path: u.path, content: u.content });
         }
-        console.log("[yukti] updated_files from backend:", updated);
-        console.log("[yukti] merged files:", merged);
         onFilesChange(merged);
+        onSnap(first.path, before, first.content);
         await saveUpdatedFilesToFirestore(project.id, updated).catch(() =>
           toast.error("Couldn't sync files to the cloud"),
         );
       }
+
+      const appliedCount =
+        typeof applied.applied === "number"
+          ? applied.applied
+          : (applied.diffs ?? []).filter((d) => d.applied !== false).length;
+      onApplied(appliedCount);
 
       if ((applied.diffs ?? []).some((d) => d.applied === false)) {
         toast.warning("Some changes could not be applied automatically.", {
@@ -668,7 +937,6 @@ function InstructionPanel({
         });
       }
     } catch (e) {
-      console.error(e);
       setSteps([]);
       toast.error(e instanceof Error ? e.message : "Something went wrong", {
         style: { color: "#f43f5e", borderColor: "#f43f5e" },
@@ -700,13 +968,21 @@ function InstructionPanel({
         />
       </div>
 
-      <div className="flex border-b border-[#2a2440] px-2 pt-2">
+      <div className="flex items-center border-b border-[#2a2440] px-2 pt-2">
         <TabButton active={tab === "manual"} onClick={() => setTab("manual")}>
           Manual
         </TabButton>
         <TabButton active={tab === "auto"} onClick={() => setTab("auto")}>
           Auto (AI)
         </TabButton>
+        {tab === "auto" && (
+          <button
+            onClick={onClearHistory}
+            className="ml-auto mb-1 rounded-md px-2 py-1 text-[11px] text-[#8b87a0] transition hover:text-[#f43f5e]"
+          >
+            Clear history
+          </button>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -726,23 +1002,11 @@ function InstructionPanel({
               toast("Discarded");
             }}
           />
-        ) : mode !== "auto" ? (
-          <div className="rounded-xl border border-[#2a2440] bg-[#0d0b14] p-5 text-sm">
-            <div className="font-semibold">You're in Manual mode.</div>
-            <p className="mt-1 text-muted-foreground">
-              Switch to Auto in settings to enable AI chat.
-            </p>
-            <Link
-              to="/dashboard"
-              className="mt-3 inline-block text-[13px] font-medium text-[#c4b5fd] hover:underline"
-            >
-              Go to Settings →
-            </Link>
-          </div>
         ) : (
           <AutoChat
             chat={chat}
             setChat={setChat}
+            onPersistMessage={onPersistMessage}
             input={chatInput}
             setInput={setChatInput}
             files={project.files}
@@ -883,9 +1147,7 @@ function ManualTab({
               <div className="flex items-center gap-2 text-[13px]">
                 <span className="w-5">{s.emoji}</span>
                 <span
-                  className={
-                    s.status === "pending" ? "text-muted-foreground" : "text-foreground"
-                  }
+                  className={s.status === "pending" ? "text-muted-foreground" : "text-foreground"}
                 >
                   {s.label}
                 </span>
@@ -910,8 +1172,7 @@ function ManualTab({
                 <motion.div
                   initial={{ width: "0%" }}
                   animate={{
-                    width:
-                      s.status === "done" ? "100%" : s.status === "running" ? "80%" : "0%",
+                    width: s.status === "done" ? "100%" : s.status === "running" ? "80%" : "0%",
                   }}
                   transition={{ duration: 0.6, ease: "easeInOut" }}
                   className="h-full bg-[#8b5cf6]"
@@ -1007,15 +1268,40 @@ function TypingDots() {
   );
 }
 
+/** Renders a chat message, formatting ``` fenced code blocks. */
+function MessageBody({ text }: { text: string }) {
+  const parts = text.split(/```/);
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <pre
+            key={i}
+            className="my-2 overflow-x-auto rounded-lg border border-[#2a2440] bg-[#0d0b14] p-2.5 font-mono text-[11.5px] text-[#d6d1e6]"
+          >
+            {part.replace(/^[a-zA-Z]*\n/, "")}
+          </pre>
+        ) : (
+          <span key={i} className="whitespace-pre-wrap">
+            {part}
+          </span>
+        ),
+      )}
+    </>
+  );
+}
+
 function AutoChat({
   chat,
   setChat,
+  onPersistMessage,
   input,
   setInput,
   files,
 }: {
-  chat: Array<{ role: "user" | "yukti"; text: string }>;
-  setChat: React.Dispatch<React.SetStateAction<Array<{ role: "user" | "yukti"; text: string }>>>;
+  chat: ChatEntry[];
+  setChat: React.Dispatch<React.SetStateAction<ChatEntry[]>>;
+  onPersistMessage: (role: "user" | "yukti", text: string) => void;
   input: string;
   setInput: (s: string) => void;
   files: ProjectFile[];
@@ -1030,19 +1316,23 @@ function AutoChat({
       content: m.text,
     }));
     setChat((c) => [...c, { role: "user", text }, { role: "yukti", text: "" }]);
+    onPersistMessage("user", text);
     setInput("");
     setSending(true);
+    let full = "";
     try {
       await streamChat(text, history, files, (chunk) => {
+        full += chunk;
         setChat((c) => {
           const next = [...c];
           const last = next[next.length - 1];
-          if (last && last.role === "yukti") next[next.length - 1] = { ...last, text: last.text + chunk };
+          if (last && last.role === "yukti")
+            next[next.length - 1] = { ...last, text: last.text + chunk };
           return next;
         });
       });
-    } catch (e) {
-      console.error(e);
+      if (full) onPersistMessage("yukti", full);
+    } catch {
       toast.error("Chat error. Please try again.", {
         style: { color: "#f43f5e", borderColor: "#f43f5e" },
       });
@@ -1080,14 +1370,14 @@ function AutoChat({
                   {m.role === "yukti" && m.text === "" && sending && i === chat.length - 1 ? (
                     <TypingDots key="dots" />
                   ) : (
-                    <motion.span
+                    <motion.div
                       key="text"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ duration: 0.2 }}
                     >
-                      {m.text}
-                    </motion.span>
+                      <MessageBody text={m.text} />
+                    </motion.div>
                   )}
                 </AnimatePresence>
               </div>
