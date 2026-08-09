@@ -93,7 +93,10 @@ class FuzzyMatcher:
             if window_height == 1:
                 score = fuzz.ratio(target_joined, window) / 100.0
             else:
-                score = fuzz.token_set_ratio(target_joined, window) / 100.0
+                score = (
+                    fuzz.ratio(target_joined, window)
+                    + fuzz.partial_ratio(target_joined, window)
+                ) / 200.0
 
             if score > best_score:
                 best_score      = score
