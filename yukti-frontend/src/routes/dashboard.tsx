@@ -1,21 +1,30 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FolderPlus, Upload, LogOut, FileCode2, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { Aurora } from "@/components/Aurora";
 import { YuktiLogo } from "@/components/YuktiLogo";
-
 import { NewProjectModal } from "@/components/NewProjectModal";
 import { ZipUploadOverlay, type ZipStep } from "@/components/ZipUploadOverlay";
+import { ModeSplash } from "@/components/ModeSplash";
+import { ApiKeySetup } from "@/components/ApiKeySetup";
 import { useAuth } from "@/lib/auth-context";
-import { getUserProfile, type UserMode } from "@/lib/user-mode";
+import { getUserProfile, saveUserMode, type UserMode } from "@/lib/user-mode";
 import {
   createProject,
   extractZipToFiles,
   listProjects,
   type Project,
 } from "@/lib/projects";
+
+type CreationStage =
+  | "idle"
+  | "naming"       // NewProjectModal open
+  | "transitioning" // brief cinematic fade before ModeSplash
+  | "mode"          // ModeSplash
+  | "apikey"        // ApiKeySetup (Auto only)
+  | "creating";     // actually creating the project
 
 export const Route = createFileRoute("/dashboard")({
   ssr: false,
@@ -35,9 +44,12 @@ function Dashboard() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [dragging, setDragging] = useState(false);
-  
   const [_mode, setMode] = useState<UserMode | null>(null);
-  const [showNewProject, setShowNewProject] = useState(false);
+
+  // Creation flow state
+  const [stage, setStage] = useState<CreationStage>("idle");
+  const pendingNameRef = useRef<string>("");
+
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadSteps, setUploadSteps] = useState<ZipStep[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -46,7 +58,6 @@ function Dashboard() {
     if (!loading && !user) navigate({ to: "/login" });
   }, [loading, user, navigate]);
 
-  // Load profile + restore the most recent workspace automatically
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -57,17 +68,51 @@ function Dashboard() {
       const list = await listProjects(user.uid).catch(() => []);
       if (cancelled) return;
       setProjects(list);
-      // Returning user with a prior workspace → jump straight back into it.
-      if (list.length > 0 && !sessionStorage.getItem("yukti-skip-restore")) {
-        sessionStorage.setItem("yukti-skip-restore", "1");
+      if (list.length > 0) {
         navigate({ to: "/project/$id", params: { id: list[0].id } });
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [user, navigate]);
 
+  // Called when user submits name in NewProjectModal
+  const handleNameSubmit = (name: string) => {
+    pendingNameRef.current = name;
+    setStage("transitioning");
+    // Brief pause for cinematic feel, then show ModeSplash
+    setTimeout(() => setStage("mode"), 600);
+  };
+
+  // Called when user picks a mode in ModeSplash
+  const handleModeSelect = (mode: UserMode) => {
+    setMode(mode);
+    if (mode === "manual") {
+      setStage("creating");
+      handleCreateProject(mode, null);
+    } else {
+      setStage("apikey");
+    }
+  };
+
+  // Called when user submits API key
+  const handleApiKeySubmit = async (apiKey: string) => {
+    setStage("creating");
+    await handleCreateProject("auto", apiKey);
+  };
+
+  const handleCreateProject = async (mode: UserMode, apiKey: string | null) => {
+    if (!user) return;
+    try {
+      await saveUserMode(user.uid, mode, apiKey ?? undefined);
+      const id = await createProject(user.uid, pendingNameRef.current, [], mode);
+      toast.success("Project created");
+      navigate({ to: "/project/$id", params: { id } });
+    } catch (e) {
+      console.error(e);
+      toast.error("Couldn't create project.");
+      setStage("idle");
+    }
+  };
 
   const handleZip = useCallback(
     async (file: File) => {
@@ -84,7 +129,6 @@ function Dashboard() {
         { emoji: "✔", label: "Project ready", status: "pending" },
       ];
       setUploadSteps(steps);
-
       try {
         const files = await extractZipToFiles(file);
         setUploadSteps((s) => s.map((x, i) => (i === 0 ? { ...x, status: "done" } : i === 1 ? { ...x, status: "running" } : x)));
@@ -142,134 +186,198 @@ function Dashboard() {
   const displayName = user.displayName || user.email?.split("@")[0] || "there";
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
-      <Aurora />
-
-      <nav className="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-6 py-6">
-        <Link to="/">
-          <YuktiLogo />
-        </Link>
-        <div className="flex items-center gap-3">
-          <div className="hidden text-right text-xs md:block">
-            <div className="font-medium text-foreground">{displayName}</div>
-            <div className="text-muted-foreground">{user.email}</div>
-          </div>
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/20 text-sm font-semibold text-primary">
-            {displayName[0]?.toUpperCase()}
-          </div>
-          <button
-            onClick={async () => {
-              await signOut();
-              navigate({ to: "/" });
-            }}
-            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/40 px-3 py-1.5 text-xs text-muted-foreground transition hover:text-foreground"
+    <>
+      {/* ── Fullscreen overlays (above dashboard) ── */}
+      <AnimatePresence>
+        {stage === "transitioning" && (
+          <motion.div
+            key="transition"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            style={{ background: "#0d0b14" }}
           >
-            <LogOut className="h-3.5 w-3.5" />
-            Sign out
-          </button>
-        </div>
-      </nav>
+            <motion.div
+              animate={{ opacity: [0.4, 1, 0.4] }}
+              transition={{ duration: 1.2, repeat: Infinity }}
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: "50%",
+                border: "2px solid rgba(139,92,246,0.6)",
+                borderTopColor: "#8b5cf6",
+              }}
+              className="animate-spin"
+            />
+          </motion.div>
+        )}
 
-      <main className="relative z-10 mx-auto max-w-7xl px-6 pb-24">
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="mt-6 mb-10"
-        >
-          <h1 className="text-3xl font-semibold md:text-4xl">
-            Welcome back, <span className="yukti-gradient-text">{displayName}</span>.
-          </h1>
-          <p className="mt-2 text-muted-foreground">
-            Drop a project ZIP anywhere on this page to get started, or create one from scratch.
-          </p>
-        </motion.div>
+        {stage === "mode" && (
+          <ModeSplash key="splash" onSelect={handleModeSelect} />
+        )}
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <ActionCard
-            icon={<FolderPlus className="h-5 w-5" />}
-            title="New project"
-            body="Create an empty workspace and paste code as you go."
-            onClick={() => setShowNewProject(true)}
+        {stage === "apikey" && (
+          <ApiKeySetup
+            key="apikey"
+            onComplete={handleApiKeySubmit}
+            onBack={() => setStage("mode")}
           />
-          <ActionCard
-            icon={<Upload className="h-5 w-5" />}
-            title="Upload a ZIP"
-            body="Drop a compressed project folder — Yukti will index it in seconds."
-            onClick={() => fileInputRef.current?.click()}
-          />
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".zip"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handleZip(f);
-              e.target.value = "";
-            }}
-          />
-        </div>
+        )}
 
-        <section className="mt-14">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Recent projects</h2>
-            <span className="text-xs text-muted-foreground">
-              {projects.length} {projects.length === 1 ? "project" : "projects"}
-            </span>
+        {stage === "creating" && (
+          <motion.div
+            key="creating"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4"
+            style={{ background: "#0d0b14" }}
+          >
+            <motion.div
+              animate={{ opacity: [0.4, 1, 0.4] }}
+              transition={{ duration: 1.2, repeat: Infinity }}
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: "50%",
+                border: "2px solid rgba(139,92,246,0.6)",
+                borderTopColor: "#8b5cf6",
+              }}
+              className="animate-spin"
+            />
+            <p style={{ color: "rgba(241,240,245,0.5)", fontSize: "0.875rem" }}>
+              Setting up your workspace…
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Dashboard ── */}
+      <div className="relative min-h-screen overflow-hidden">
+        <Aurora />
+
+        <nav className="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-6 py-6">
+          <Link to="/">
+            <YuktiLogo />
+          </Link>
+          <div className="flex items-center gap-3">
+            <div className="hidden text-right text-xs md:block">
+              <div className="font-medium text-foreground">{displayName}</div>
+              <div className="text-muted-foreground">{user.email}</div>
+            </div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/20 text-sm font-semibold text-primary">
+              {displayName[0]?.toUpperCase()}
+            </div>
+            <button
+              onClick={async () => {
+                await signOut();
+                navigate({ to: "/" });
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/40 px-3 py-1.5 text-xs text-muted-foreground transition hover:text-foreground"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Sign out
+            </button>
+          </div>
+        </nav>
+
+        <main className="relative z-10 mx-auto max-w-7xl px-6 pb-24">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="mt-6 mb-10"
+          >
+            <h1 className="text-3xl font-semibold md:text-4xl">
+              Welcome back, <span className="yukti-gradient-text">{displayName}</span>.
+            </h1>
+            <p className="mt-2 text-muted-foreground">
+              Drop a project ZIP anywhere on this page to get started, or create one from scratch.
+            </p>
+          </motion.div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <ActionCard
+              icon={<FolderPlus className="h-5 w-5" />}
+              title="New project"
+              body="Create an empty workspace and paste code as you go."
+              onClick={() => setStage("naming")}
+            />
+            <ActionCard
+              icon={<Upload className="h-5 w-5" />}
+              title="Upload a ZIP"
+              body="Drop a compressed project folder — Yukti will index it in seconds."
+              onClick={() => fileInputRef.current?.click()}
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".zip"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleZip(f);
+                e.target.value = "";
+              }}
+            />
           </div>
 
-          {projects.length === 0 ? (
-            <div className="glass rounded-3xl border-dashed p-12 text-center">
-              <div className="mx-auto mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-primary/15 text-primary">
-                <FileCode2 className="h-5 w-5" />
+          <section className="mt-14">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Recent projects</h2>
+              <span className="text-xs text-muted-foreground">
+                {projects.length} {projects.length === 1 ? "project" : "projects"}
+              </span>
+            </div>
+
+            {projects.length === 0 ? (
+              <div className="glass rounded-3xl border-dashed p-12 text-center">
+                <div className="mx-auto mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-primary/15 text-primary">
+                  <FileCode2 className="h-5 w-5" />
+                </div>
+                <h3 className="text-lg font-semibold">No projects yet</h3>
+                <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+                  Your projects will appear here. Drop a ZIP anywhere on this page, or start a fresh
+                  workspace above.
+                </p>
               </div>
-              <h3 className="text-lg font-semibold">No projects yet</h3>
-              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-                Your projects will appear here. Drop a ZIP anywhere on this page, or start a fresh
-                workspace above.
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-3">
-              {projects.map((p) => (
-                <Link
-                  key={p.id}
-                  to="/project/$id"
-                  params={{ id: p.id }}
-                  className="glass rounded-2xl p-5 transition hover:border-primary/50 hover:scale-[1.01]"
-                >
-                  <div className="text-sm font-semibold">{p.name}</div>
-                  <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                    <Clock className="h-3 w-3" />
-                    {p.files?.length ?? 0} files
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
-      </main>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-3">
+                {projects.map((p) => (
+                  <Link
+                    key={p.id}
+                    to="/project/$id"
+                    params={{ id: p.id }}
+                    className="glass rounded-2xl p-5 transition hover:border-primary/50 hover:scale-[1.01]"
+                  >
+                    <div className="text-sm font-semibold">{p.name}</div>
+                    <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock className="h-3 w-3" />
+                      {p.files?.length ?? 0} files
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
+        </main>
 
-      <ZipUploadOverlay
-        visible={dragging || !!uploadFile}
-        dropActive={dragging}
-        filename={uploadFile?.name ?? null}
-        steps={uploadSteps}
-      />
+        <ZipUploadOverlay
+          visible={dragging || !!uploadFile}
+          dropActive={dragging}
+          filename={uploadFile?.name ?? null}
+          steps={uploadSteps}
+        />
 
-
-      <NewProjectModal
-        open={showNewProject}
-        onClose={() => setShowNewProject(false)}
-        onCreate={async (name) => {
-          const id = await createProject(user.uid, name, []);
-          setShowNewProject(false);
-          toast.success("Project created");
-          navigate({ to: "/project/$id", params: { id } });
-        }}
-      />
-    </div>
+        <NewProjectModal
+          open={stage === "naming"}
+          onClose={() => setStage("idle")}
+          onCreate={handleNameSubmit}
+        />
+      </div>
+    </>
   );
 }
 

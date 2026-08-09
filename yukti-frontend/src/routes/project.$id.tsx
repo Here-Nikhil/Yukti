@@ -77,6 +77,30 @@ function Workspace() {
   const [appliedCount, setAppliedCount] = useState(0);
   const [chat, setChat] = useState<ChatEntry[]>([]);
   const [snap, setSnap] = useState<{ path: string; oldCode: string; newCode: string } | null>(null);
+  const editorRef = useRef<import("monaco-editor").editor.IStandaloneCodeEditor | null>(null);
+
+  const highlightChangedLines = (oldCode: string, newCode: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const oldLines = oldCode.split("\n");
+    const newLines = newCode.split("\n");
+    const decorations: import("monaco-editor").editor.IModelDeltaDecoration[] = [];
+    newLines.forEach((line, i) => {
+      if (line !== oldLines[i]) {
+        decorations.push({
+          range: new (window as any).monaco.Range(i + 1, 1, i + 1, 1),
+          options: {
+            isWholeLine: true,
+            className: "yukti-glow-line",
+          },
+        });
+      }
+    });
+    const ids = editor.deltaDecorations([], decorations);
+    window.setTimeout(() => {
+      editor.deltaDecorations(ids, []);
+    }, 2000);
+  };
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/login" });
@@ -262,14 +286,15 @@ function Workspace() {
               defaultLanguage={langFor(activeFile.path)}
               value={activeFile.content}
               options={{
-                readOnly: true,
                 minimap: { enabled: false },
                 fontFamily: "JetBrains Mono, ui-monospace",
                 fontSize: 13,
                 scrollBeyondLastLine: false,
                 padding: { top: 12 },
               }}
-              onMount={(_editor, monaco) => {
+              onMount={(editor, monaco) => {
+                editorRef.current = editor;
+                (window as any).monaco = monaco;
                 monaco.editor.defineTheme("yukti-dark", {
                   base: "vs-dark",
                   inherit: true,
@@ -311,7 +336,10 @@ function Workspace() {
                   newCode={snap.newCode}
                   showFor={120}
                   typeSpeed={5}
-                  onDone={() => window.setTimeout(() => setSnap(null), 250)}
+                  onDone={() => {
+                    if (snap) highlightChangedLines(snap.oldCode, snap.newCode);
+                    window.setTimeout(() => setSnap(null), 250);
+                  }}
                 />
               </motion.div>
             )}

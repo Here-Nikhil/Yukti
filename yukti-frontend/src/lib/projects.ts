@@ -76,11 +76,13 @@ export async function createProject(
   ownerId: string,
   name: string,
   files: ProjectFile[],
+  mode?: UserMode,
 ): Promise<string> {
   const ref = await addDoc(collection(getDb(), "projects"), {
     name,
     ownerId,
     files,
+    mode: mode ?? null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -94,21 +96,31 @@ export async function getProject(id: string): Promise<Project | null> {
 }
 
 export async function listProjects(ownerId: string): Promise<Project[]> {
-  const q = query(
-    collection(getDb(), "projects"),
-    where("ownerId", "==", ownerId),
-    orderBy("updatedAt", "desc"),
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Project, "id">) }));
-}
-
-export async function saveProjectFiles(id: string, files: ProjectFile[]): Promise<void> {
-  await setDoc(
-    doc(getDb(), "projects", id),
-    { files, updatedAt: serverTimestamp() },
-    { merge: true },
-  );
+  try {
+    const q = query(
+      collection(getDb(), "projects"),
+      where("ownerId", "==", ownerId),
+      orderBy("updatedAt", "desc"),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Project, "id">) }));
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes("index")) {
+      const q2 = query(
+        collection(getDb(), "projects"),
+        where("ownerId", "==", ownerId),
+      );
+      const snap = await getDocs(q2);
+      const results = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Project, "id">) }));
+      return results.sort((a, b) => {
+        const at = (a.updatedAt as { seconds?: number })?.seconds ?? 0;
+        const bt = (b.updatedAt as { seconds?: number })?.seconds ?? 0;
+        return bt - at;
+      });
+    }
+    throw err;
+  }
 }
 
 export async function getMostRecentProject(ownerId: string): Promise<Project | null> {

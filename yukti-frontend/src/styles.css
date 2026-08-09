@@ -159,3 +159,41 @@ a[href*="lovable.app/edit"] {
   opacity: 0 !important;
   pointer-events: none !important;
 }
+
+/* ===== ModeSplash animations ===== */
+@keyframes ms-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-14px); }
+}
+@keyframes ms-pulse-purple {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.45; }
+}
+@keyframes ms-pulse-cyan {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.4; }
+}
+@keyframes ms-slow-drift {
+  0%, 100% { background-position: 49% 50%; }
+  50% { background-position: 51% 50%; }
+}
+@keyframes ms-holo-cycle {
+  0% { opacity: 0; transform: translateY(8px); }
+  15% { opacity: 0.9; transform: translateY(0); }
+  65% { opacity: 0.9; transform: translateY(0); }
+  85% { opacity: 0; transform: translateY(-8px); }
+  100% { opacity: 0; transform: translateY(-8px); }
+}
+@keyframes ms-particle-float {
+  0% { transform: translate(0, 0); opacity: 0.15; }
+  25% { transform: translate(14px, -22px); opacity: 0.4; }
+  50% { transform: translate(-10px, -44px); opacity: 0.3; }
+  75% { transform: translate(8px, -66px); opacity: 0.35; }
+  100% { transform: translate(0, -88px); opacity: 0; }
+}
+/* Monaco apply glow */
+.yukti-glow-line {
+  background: rgba(16, 185, 129, 0.12) !important;
+  border-left: 2px solid #10b981 !important;
+  transition: background 0.4s ease, border-color 0.4s ease;
+}
