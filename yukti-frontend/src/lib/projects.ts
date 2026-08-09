@@ -95,6 +95,14 @@ export async function getProject(id: string): Promise<Project | null> {
   return { id: snap.id, ...(snap.data() as Omit<Project, "id">) };
 }
 
+export async function saveProjectFiles(id: string, files: ProjectFile[]): Promise<void> {
+  await setDoc(
+    doc(getDb(), "projects", id),
+    { files, updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+}
+
 export async function listProjects(ownerId: string): Promise<Project[]> {
   try {
     const q = query(
