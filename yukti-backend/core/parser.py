@@ -93,7 +93,7 @@ class LLMOutputParser:
         """
         # If the whole text contains exactly one code block, treat as single chunk
         fence_count = text.count("```")
-        if fence_count in (2, 4):
+        if fence_count >= 2:
             return [text.strip()]
 
         # Split on numbered list items: "1.", "2.", etc.
