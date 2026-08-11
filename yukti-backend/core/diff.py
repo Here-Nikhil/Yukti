@@ -214,13 +214,12 @@ class DiffGenerator:
         file_content: str,
         anchor_line: int,
     ) -> str:
-        """
-        Apply context-detected indentation to `new_block`.
-
-        Only lines that have *no* leading whitespace of their own get the
-        detected prefix added — lines already indented are left untouched.
-        This avoids double-indenting intentionally nested code.
-        """
+        # If the first non-empty line of the replacement already has
+        # indentation or starts at column 0 as a top-level definition,
+        # don't touch it.
+        first_line = next((l for l in new_block.splitlines() if l.strip()), "")
+        if not first_line or not first_line[0].isspace():
+            return new_block
         base_indent = self._detect_indent(file_content, anchor_line)
         if not base_indent:
             return new_block
