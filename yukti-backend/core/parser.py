@@ -287,6 +287,8 @@ class LLMOutputParser:
     # ─── Helpers ──────────────────────────────────────────────────────────
 
     def _extract_code_blocks(self, text: str) -> list[str]:
+        import logging
+        logging.warning(f"CODE BLOCK DEBUG: fence_count={text.count('```')} text_preview={text[:120]!r}")
         # Fenced code blocks: ```lang\n...\n```
         fenced = re.findall(r'```(?:\w+)?[ \t]*\n(.*?)```', text, re.DOTALL)
         if not fenced:
