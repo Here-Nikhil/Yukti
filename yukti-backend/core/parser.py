@@ -48,6 +48,10 @@ class LLMOutputParser:
         for instruction in instructions:
             instruction.file = self._resolve_file(instruction.file, available_files)
 
+        import logging
+        for inst in instructions:
+            logging.warning(f"PARSER DEBUG: file={inst.file} action={inst.action} target_preview={str(inst.target)[:60]!r} replacement_preview={str(inst.replacement)[:60]!r}")
+
         return instructions
 
     # ─── Format Detectors ────────────────────────────────────────────────
