@@ -296,6 +296,15 @@ class LLMOutputParser:
         if fenced:
             return [b.rstrip() for b in fenced]
 
+        # No backticks — try to detect language-tagged blocks
+        # e.g. "python\ncode here\n" between section headers
+        lang_block = re.findall(
+            r'^(?:python|javascript|typescript|js|ts|css|sql|go|rust|java|bash|sh|json|yaml|html)\s*\n(.*?)(?=\n(?:python|javascript|typescript|js|ts|css|sql|go|rust|java|bash|sh|json|yaml|html)\s*\n|\Z)',
+            text, re.DOTALL | re.IGNORECASE | re.MULTILINE
+        )
+        if lang_block:
+            return [b.strip() for b in lang_block if b.strip()]
+
         # Inline code with backticks (single)
         inline = re.findall(r'`([^`]+)`', text)
         return [i.strip() for i in inline] if inline else []
