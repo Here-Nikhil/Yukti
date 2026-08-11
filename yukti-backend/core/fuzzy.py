@@ -65,9 +65,10 @@ class FuzzyMatcher:
         # The target might itself be multi-line; in that case we compare
         # windows of the same height. For single-line targets we compare
         # one line at a time.
-        target_lines  = [l for l in target.splitlines() if l.strip()]
-        window_height = max(len(target_lines), 1)
-        target_joined = "\n".join(target_lines)
+        target_lines_raw = target.splitlines()
+        target_lines     = [l for l in target_lines_raw if l.strip()]
+        window_height    = max(len(target_lines_raw), 1)
+        target_joined    = "\n".join(target_lines)
 
         best_score      = 0.0
         best_line_start = -1  # 0-based index into `lines`
