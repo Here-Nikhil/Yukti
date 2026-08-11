@@ -65,7 +65,7 @@ class FuzzyMatcher:
         # The target might itself be multi-line; in that case we compare
         # windows of the same height. For single-line targets we compare
         # one line at a time.
-        target_lines  = target.splitlines()
+        target_lines  = [l for l in target.splitlines() if l.strip()]
         window_height = max(len(target_lines), 1)
         target_joined = "\n".join(target_lines)
 
@@ -86,7 +86,8 @@ class FuzzyMatcher:
             candidate_indices = nearby + rest
 
         for start_idx in candidate_indices:
-            window = "\n".join(lines[start_idx : start_idx + window_height])
+            window_raw = lines[start_idx : start_idx + window_height]
+            window = "\n".join(l for l in window_raw if l.strip())
 
             # token_set_ratio handles reordered / partially missing tokens
             # better than simple ratio for code snippets.
