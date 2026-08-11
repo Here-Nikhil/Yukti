@@ -108,6 +108,8 @@ class FuzzyMatcher:
             if best_score == 1.0:
                 break
 
+        import logging
+        logging.warning(f"FUZZY DEBUG: best_score={best_score:.3f} best_line={best_line_start} target_preview={target_joined[:60]!r}")
         # ── 3. Threshold gate ─────────────────────────────────────────────────
         if best_score < THRESHOLD or best_line_start == -1:
             return {
