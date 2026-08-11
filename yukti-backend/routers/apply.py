@@ -50,7 +50,11 @@ async def apply_instructions(
                     instruction  = inst,
                     fuzzy        = _fuzzy,
                 )
-            except ValueError:
+                import logging
+                logging.warning(f"APPLY DEBUG: success for {inst.file}")
+            except ValueError as e:
+                import logging
+                logging.warning(f"APPLY DEBUG: failed for {inst.file} error={e}")
                 file_applied = False
 
         hunks = _diff.generate(
