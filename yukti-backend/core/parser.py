@@ -99,7 +99,7 @@ class LLMOutputParser:
         fence_count = text.count("```")
         if fence_count >= 2:
             return [text.strip()]
-         # If text contains section headers, treat as single chunk
+        # If text contains section headers, treat as single chunk
         if re.search(r'(?:find this|replace with|original|updated?)\s*(?:in\s+[\w/\-\.]+)?\s*:', text, re.IGNORECASE):
             return [text.strip()]
 
@@ -317,6 +317,8 @@ class LLMOutputParser:
                 if code.strip():
                     blocks.append(code.strip())
             if len(blocks) >= 2:
+                import logging
+                logging.warning(f"BLOCKS DEBUG: target_len={len(blocks[0])} replacement_len={len(blocks[1])} target_tail={blocks[0][-80:]!r} replacement_tail={blocks[1][-80:]!r}")
                 return blocks
 
         # Fallback: language-tagged blocks
