@@ -309,11 +309,13 @@ class LLMOutputParser:
         logging.warning(f"SECTION SPLIT DEBUG: count={len(section_split)} parts={[s[:40] for s in section_split]!r}")
         if len(section_split) >= 3:
             blocks = []
-            for section in section_split[1:]:
+            for i, section in enumerate(section_split[1:]):
                 code = re.sub(
                     r'^(?:python|javascript|typescript|js|ts|css|sql|go|rust|java|bash|sh|json|yaml|html)\s*\n',
                     '', section.strip(), flags=re.IGNORECASE
                 )
+                import logging
+                logging.warning(f"BLOCK LOOP DEBUG: i={i} section_preview={section[:60]!r} code_preview={code[:60]!r} code_stripped={bool(code.strip())}")
                 if code.strip():
                     blocks.append(code.strip())
             if len(blocks) >= 2:
