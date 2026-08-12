@@ -302,6 +302,8 @@ class LLMOutputParser:
             r'\n?(?:find this|replace with|original|updated?|before|after)\s*(?:in\s+[\w/\-\.]+)?\s*:\s*\n+',
             text, flags=re.IGNORECASE
         )
+        import logging
+        logging.warning(f"SECTION SPLIT DEBUG: count={len(section_split)} parts={[s[:40] for s in section_split]!r}")
         if len(section_split) >= 3:
             blocks = []
             for section in section_split[1:]:
