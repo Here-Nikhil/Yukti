@@ -99,6 +99,9 @@ class LLMOutputParser:
         fence_count = text.count("```")
         if fence_count >= 2:
             return [text.strip()]
+         # If text contains section headers, treat as single chunk
+        if re.search(r'(?:find this|replace with|original|updated?)\s*(?:in\s+[\w/\-\.]+)?\s*:', text, re.IGNORECASE):
+            return [text.strip()]
 
         # Split on numbered list items: "1.", "2.", etc.
         numbered = re.split(r'\n(?=\d+\.)', text)
