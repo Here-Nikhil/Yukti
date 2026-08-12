@@ -287,27 +287,44 @@ class LLMOutputParser:
     # ─── Helpers ──────────────────────────────────────────────────────────
 
     def _extract_code_blocks(self, text: str) -> list[str]:
-        import logging
-        logging.warning(f"CODE BLOCK DEBUG: fence_count={text.count('```')} text_preview={text[:120]!r}")
-        # Fenced code blocks: ```lang\n...\n```
-        fenced = re.findall(r'```(?:\w+)?[ \t]*\n(.*?)```', text, re.DOTALL)
-        if not fenced:
-            fenced = re.findall(r'```[ \t]*\n(.*?)```', text, re.DOTALL)
-        if fenced:
-            return [b.rstrip() for b in fenced]
+    import logging
+    logging.warning(f"CODE BLOCK DEBUG: fence_count={text.count('```')} text_preview={text[:120]!r}")
 
-        # No backticks — try to detect language-tagged blocks
-        # e.g. "python\ncode here\n" between section headers
-        lang_block = re.findall(
-            r'^(?:python|javascript|typescript|js|ts|css|sql|go|rust|java|bash|sh|json|yaml|html)\s*\n(.*?)(?=\n(?:python|javascript|typescript|js|ts|css|sql|go|rust|java|bash|sh|json|yaml|html)\s*\n|\Z)',
-            text, re.DOTALL | re.IGNORECASE | re.MULTILINE
-        )
-        if lang_block:
-            return [b.strip() for b in lang_block if b.strip()]
+    # Fenced code blocks: ```lang\n...\n```
+    fenced = re.findall(r'```(?:\w+)?[ \t]*\n(.*?)```', text, re.DOTALL)
+    if not fenced:
+        fenced = re.findall(r'```[ \t]*\n(.*?)```', text, re.DOTALL)
+    if fenced:
+        return [b.rstrip() for b in fenced]
 
-        # Inline code with backticks (single)
-        inline = re.findall(r'`([^`]+)`', text)
-        return [i.strip() for i in inline] if inline else []
+    # No backticks — split on section headers first
+    section_split = re.split(
+        r'\n?(?:find this|replace with|original|updated?|before|after)\s*(?:in\s+[\w/\-\.]+)?\s*:\s*\n',
+        text, flags=re.IGNORECASE
+    )
+    if len(section_split) >= 3:
+        blocks = []
+        for section in section_split[1:]:
+            code = re.sub(
+                r'^(?:python|javascript|typescript|js|ts|css|sql|go|rust|java|bash|sh|json|yaml|html)\s*\n',
+                '', section.strip(), flags=re.IGNORECASE
+            )
+            if code.strip():
+                blocks.append(code.strip())
+        if len(blocks) >= 2:
+            return blocks
+
+    # Fallback: language-tagged blocks
+    lang_block = re.findall(
+        r'^(?:python|javascript|typescript|js|ts|css|sql|go|rust|java|bash|sh|json|yaml|html)\s*\n(.*?)(?=\n(?:python|javascript|typescript|js|ts|css|sql|go|rust|java|bash|sh|json|yaml|html)\s*\n|\Z)',
+        text, re.DOTALL | re.IGNORECASE | re.MULTILINE
+    )
+    if lang_block:
+        return [b.strip() for b in lang_block if b.strip()]
+
+    # Inline single backticks
+    inline = re.findall(r'`([^`]+)`', text)
+    return [i.strip() for i in inline] if inline else []
 
     def _extract_line_hint(self, text: str) -> Optional[int]:
         match = re.search(r'line[s]?\s+(\d+)', text, re.IGNORECASE)
