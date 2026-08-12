@@ -299,7 +299,7 @@ class LLMOutputParser:
 
         # No backticks — split on section headers first
         section_split = re.split(
-            r'\n?(?:find this|replace with|original|updated?|before|after)\s*(?:in\s+[\w/\-\.]+)?\s*:\s*\n',
+            r'\n?(?:find this|replace with|original|updated?|before|after)\s*(?:in\s+[\w/\-\.]+)?\s*:\s*\n+',
             text, flags=re.IGNORECASE
         )
         if len(section_split) >= 3:
